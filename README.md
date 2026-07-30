@@ -2,7 +2,7 @@
 
 Void is an AI-first coding workspace for running coding agents concurrently in isolated Git branches and worktrees. It is built in Rust with [GPUI](https://gpui.rs/), Zed's GPU-accelerated UI framework.
 
-The repository contains the native GPUI application shell and SQLite persistence for Void's workspace, repositories, and managed branch/worktree records. Terminal, agent, repository-discovery, and Git-operation features have not been implemented yet.
+The repository contains the native GPUI application shell, first-launch workspace and repository onboarding, managed branch/worktree creation, a repository sidebar, and SQLite persistence for Void's workspace hierarchy. Terminal and agent execution have not been implemented yet.
 
 ## Prerequisites
 

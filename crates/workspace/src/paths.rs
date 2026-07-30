@@ -12,6 +12,8 @@ pub struct VoidPaths {
     data_dir: PathBuf,
 }
 
+impl gpui::Global for VoidPaths {}
+
 impl VoidPaths {
     /// Resolves Void's directory beneath the platform's standard local data directory.
     pub fn discover() -> Result<Self> {

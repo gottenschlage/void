@@ -366,6 +366,15 @@ impl WorkspaceDb {
             .context("failed to archive branch")
     }
 
+    pub fn first_workspace(&self) -> Result<Option<Workspace>> {
+        let row = self.connection.select_row::<(WorkspaceId, String)>(sql!(
+            SELECT id, name FROM workspaces ORDER BY id LIMIT 1
+        ))?()
+        .context("failed to load workspace")?;
+
+        Ok(row.map(|(id, name)| Workspace { id, name }))
+    }
+
     pub fn workspaces(&self) -> Result<Vec<Workspace>> {
         let rows = self.connection.select::<(WorkspaceId, String)>(sql!(
             SELECT id, name FROM workspaces ORDER BY id
@@ -525,6 +534,13 @@ mod tests {
         pollster::block_on(async {
             let db = WorkspaceDb::open_test().await?;
             let workspace_id = db.create_workspace("Void".into()).await?;
+            assert_eq!(
+                db.first_workspace()?,
+                Some(Workspace {
+                    id: workspace_id,
+                    name: "Void".into(),
+                })
+            );
             let repository_id = db
                 .add_repository(NewRepository {
                     workspace_id,

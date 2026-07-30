@@ -10,6 +10,8 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+anyhow.workspace = true
 gpui.workspace = true
 gpui_platform = { workspace = true, features = ["font-kit", "wayland", "x11"] }
+rust-embed.workspace = true
 workspace = { path = "../workspace" }

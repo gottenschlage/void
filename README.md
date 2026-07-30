@@ -1,8 +1,10 @@
 # Void
 
+![Void workspace](assets/screenshot.png)
+
 Void is an AI-first coding workspace for running coding agents concurrently in isolated Git branches and worktrees. It is built in Rust with [GPUI](https://gpui.rs/), Zed's GPU-accelerated UI framework.
 
-The repository contains the native GPUI application shell, first-launch workspace and repository onboarding, managed branch/worktree creation, a repository sidebar, and SQLite persistence for Void's workspace hierarchy. Terminal and agent execution have not been implemented yet.
+The repository contains the native GPUI application shell, first-launch workspace and repository onboarding, managed branch/worktree creation, a repository sidebar, PTY-backed branch terminals, and SQLite persistence for Void's workspace hierarchy.
 
 ## Prerequisites
 
@@ -21,7 +23,7 @@ From the repository root:
 cargo run -p void
 ```
 
-A successful run opens a centered `1300 × 800` window containing the temporary Void scaffold view.
+A successful run opens a centered `1300 × 850` Void workspace window.
 
 ## Validate
 
@@ -38,7 +40,9 @@ cargo test --workspace
 .
 ├── crates/
 │   ├── void/          # Thin native application crate and composition root
+│   ├── void_terminal/ # PTY-backed terminal sessions and rendering
 │   └── workspace/     # Application paths and workspace-domain persistence
+├── assets/            # README and project imagery
 ├── docs/
 │   ├── architecture.md
 │   └── decisions/     # Durable architecture decision records

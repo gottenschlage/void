@@ -1,8 +1,3 @@
-use std::{
-    sync::atomic::{AtomicU64, Ordering},
-    time::{SystemTime, UNIX_EPOCH},
-};
-
 use gpui::{
     Anchor, Context, EventEmitter, Focusable, MouseButton, MouseDownEvent, MouseUpEvent, Role,
     Window, actions, anchored, deferred, div, prelude::*, px, rgb,
@@ -458,21 +453,5 @@ impl gpui::Render for BranchDialog {
 }
 
 fn generated_branch_name() -> String {
-    const ADJECTIVES: &[&str] = &[
-        "brisk", "calm", "clever", "eager", "gentle", "lucid", "quiet", "steady",
-    ];
-    const NOUNS: &[&str] = &[
-        "badger", "falcon", "heron", "lynx", "otter", "raven", "swift", "wren",
-    ];
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-
-    let seed = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_nanos() as u64)
-        ^ NEXT
-            .fetch_add(1, Ordering::Relaxed)
-            .wrapping_mul(0x9e37_79b9);
-    let adjective = ADJECTIVES[seed as usize % ADJECTIVES.len()];
-    let noun = NOUNS[(seed.rotate_left(17) as usize) % NOUNS.len()];
-    format!("{adjective}-{noun}")
+    petname::petname(2, "-").unwrap_or_else(|| "calm-raven".to_owned())
 }

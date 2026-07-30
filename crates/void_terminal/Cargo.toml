@@ -1,0 +1,16 @@
+[package]
+name = "void_terminal"
+version = "0.1.0"
+description = "PTY-backed branch terminal panels for Void."
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+gpui.workspace = true
+task.workspace = true
+terminal.workspace = true
+util.workspace = true

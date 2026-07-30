@@ -13,5 +13,9 @@ workspace = true
 anyhow.workspace = true
 gpui.workspace = true
 gpui_platform = { workspace = true, features = ["font-kit", "wayland", "x11"] }
+petname.workspace = true
 rust-embed.workspace = true
+settings.workspace = true
+theme.workspace = true
 workspace = { path = "../workspace" }
+void_terminal = { path = "../void_terminal" }

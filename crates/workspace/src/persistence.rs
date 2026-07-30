@@ -264,6 +264,81 @@ impl WorkspaceDb {
             .context("failed to add repository")
     }
 
+    /// Updates whether an active repository is pinned in workspace ordering.
+    pub async fn set_repository_pinned(
+        &self,
+        repository_id: RepositoryId,
+        is_pinned: bool,
+    ) -> Result<()> {
+        self.connection
+            .write(move |connection| {
+                connection.exec_bound::<(bool, RepositoryId)>(sql!(
+                    UPDATE repositories
+                    SET is_pinned = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ? AND archived_at IS NULL
+                ))?((is_pinned, repository_id))
+            })
+            .await
+            .context("failed to update repository pin")
+    }
+
+    /// Hides a repository from the active workspace without deleting its data.
+    pub async fn archive_repository(&self, repository_id: RepositoryId) -> Result<()> {
+        self.connection
+            .write(move |connection| {
+                connection.exec_bound::<RepositoryId>(sql!(
+                    UPDATE repositories
+                    SET archived_at = CURRENT_TIMESTAMP,
+                        updated_at = CURRENT_TIMESTAMP,
+                        is_pinned = FALSE
+                    WHERE id = ? AND archived_at IS NULL
+                ))?(repository_id)
+            })
+            .await
+            .context("failed to archive repository")
+    }
+
+    /// Restores an archived repository to the active workspace.
+    pub async fn unarchive_repository(&self, repository_id: RepositoryId) -> Result<()> {
+        self.connection
+            .write(move |connection| {
+                connection.exec_bound::<RepositoryId>(sql!(
+                    UPDATE repositories
+                    SET archived_at = NULL, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ? AND archived_at IS NOT NULL
+                ))?(repository_id)
+            })
+            .await
+            .context("failed to restore repository")
+    }
+
+    /// Persists the visible repository order within a workspace.
+    pub async fn reorder_repositories(
+        &self,
+        workspace_id: WorkspaceId,
+        repository_ids: Vec<RepositoryId>,
+    ) -> Result<()> {
+        self.connection
+            .write(move |connection| {
+                connection.with_savepoint("reorder_repositories", || {
+                    for (position, repository_id) in repository_ids.into_iter().enumerate() {
+                        connection.exec_bound::<(i64, RepositoryId, WorkspaceId)>(sql!(
+                            UPDATE repositories
+                            SET position = ?, updated_at = CURRENT_TIMESTAMP
+                            WHERE id = ? AND workspace_id = ? AND archived_at IS NULL
+                        ))?((
+                            position as i64,
+                            repository_id,
+                            workspace_id,
+                        ))?;
+                    }
+                    Ok(())
+                })
+            })
+            .await
+            .context("failed to reorder repositories")
+    }
+
     /// Reserves the next branch number, unique branch name, and worktree path.
     ///
     /// Archived names and paths remain reserved. If the requested name or its
@@ -364,6 +439,29 @@ impl WorkspaceDb {
             })
             .await
             .context("failed to archive branch")
+    }
+
+    /// Persists the visible branch order within one repository.
+    pub async fn reorder_branches(
+        &self,
+        repository_id: RepositoryId,
+        branch_ids: Vec<BranchId>,
+    ) -> Result<()> {
+        self.connection
+            .write(move |connection| {
+                connection.with_savepoint("reorder_branches", || {
+                    for (position, branch_id) in branch_ids.into_iter().enumerate() {
+                        connection.exec_bound::<(i64, BranchId, RepositoryId)>(sql!(
+                            UPDATE branches
+                            SET position = ?, updated_at = CURRENT_TIMESTAMP
+                            WHERE id = ? AND repository_id = ? AND archived_at IS NULL
+                        ))?((position as i64, branch_id, repository_id))?;
+                    }
+                    Ok(())
+                })
+            })
+            .await
+            .context("failed to reorder branches")
     }
 
     pub fn first_workspace(&self) -> Result<Option<Workspace>> {
@@ -623,6 +721,95 @@ mod tests {
                 second.path,
                 Path::new("/data/Void/worktrees/app/fix-auth-2")
             );
+            Ok::<_, anyhow::Error>(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn repository_menu_state_is_persisted_without_deleting_the_repository() {
+        pollster::block_on(async {
+            let db = WorkspaceDb::open_test().await?;
+            let workspace_id = db.create_workspace("Void".into()).await?;
+            let repository_id = db
+                .add_repository(NewRepository {
+                    workspace_id,
+                    name: "app".into(),
+                    path: "/code/app".into(),
+                    position: 0,
+                    is_pinned: false,
+                })
+                .await?;
+
+            db.set_repository_pinned(repository_id, true).await?;
+            assert!(db.repositories(workspace_id)?[0].is_pinned);
+
+            db.archive_repository(repository_id).await?;
+            let repository = &db.repositories(workspace_id)?[0];
+            assert!(!repository.is_pinned);
+            assert!(repository.archived_at.is_some());
+
+            db.unarchive_repository(repository_id).await?;
+            assert!(db.repositories(workspace_id)?[0].archived_at.is_none());
+            Ok::<_, anyhow::Error>(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn persists_repository_and_branch_drag_order() {
+        pollster::block_on(async {
+            let db = WorkspaceDb::open_test().await?;
+            let workspace_id = db.create_workspace("Void".into()).await?;
+            let first_repository = db
+                .add_repository(NewRepository {
+                    workspace_id,
+                    name: "first".into(),
+                    path: "/code/first".into(),
+                    position: 0,
+                    is_pinned: false,
+                })
+                .await?;
+            let second_repository = db
+                .add_repository(NewRepository {
+                    workspace_id,
+                    name: "second".into(),
+                    path: "/code/second".into(),
+                    position: 1,
+                    is_pinned: false,
+                })
+                .await?;
+            db.reorder_repositories(workspace_id, vec![second_repository, first_repository])
+                .await?;
+            assert_eq!(db.repositories(workspace_id)?[0].name, "second");
+
+            let first_branch = db
+                .reserve_branch(
+                    NewBranch {
+                        repository_id: first_repository,
+                        requested_name: "first-branch".into(),
+                        base_ref: "main".into(),
+                        position: 0,
+                        is_pinned: false,
+                    },
+                    &test_paths(),
+                )
+                .await?;
+            let second_branch = db
+                .reserve_branch(
+                    NewBranch {
+                        repository_id: first_repository,
+                        requested_name: "second-branch".into(),
+                        base_ref: "main".into(),
+                        position: 1,
+                        is_pinned: false,
+                    },
+                    &test_paths(),
+                )
+                .await?;
+            db.reorder_branches(first_repository, vec![second_branch.id, first_branch.id])
+                .await?;
+            assert_eq!(db.branches(first_repository)?[0].name, "second-branch");
             Ok::<_, anyhow::Error>(())
         })
         .unwrap();

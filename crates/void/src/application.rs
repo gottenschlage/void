@@ -7,13 +7,31 @@ use gpui::{
     App, Bounds, Context, Window, WindowBounds, WindowOptions, div, prelude::*, px, rgb, size,
 };
 use gpui_platform::application;
+use workspace::{VoidPaths, WorkspaceDb};
 
 const INITIAL_WINDOW_WIDTH: f32 = 1_300.0;
 const INITIAL_WINDOW_HEIGHT: f32 = 800.0;
 
 /// Starts GPUI, creates Void's first window, and hands its root view to GPUI.
 pub(crate) fn run() {
-    application().run(|cx: &mut App| {
+    let paths = match VoidPaths::discover() {
+        Ok(paths) => paths,
+        Err(error) => {
+            eprintln!("failed to resolve Void's application-data directory: {error:#}");
+            return;
+        }
+    };
+    let workspace_db = match gpui::block_on(WorkspaceDb::open_default(&paths)) {
+        Ok(database) => database,
+        Err(error) => {
+            eprintln!("failed to open Void's database: {error:#}");
+            return;
+        }
+    };
+
+    application().run(move |cx: &mut App| {
+        cx.set_global(workspace_db);
+
         let bounds = Bounds::centered(
             None,
             size(px(INITIAL_WINDOW_WIDTH), px(INITIAL_WINDOW_HEIGHT)),

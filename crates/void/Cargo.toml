@@ -12,3 +12,4 @@ workspace = true
 [dependencies]
 gpui.workspace = true
 gpui_platform = { workspace = true, features = ["font-kit", "wayland", "x11"] }
+workspace = { path = "../workspace" }

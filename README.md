@@ -2,7 +2,7 @@
 
 Void is an AI-first coding workspace for running coding agents concurrently in isolated Git branches and worktrees. It is built in Rust with [GPUI](https://gpui.rs/), Zed's GPU-accelerated UI framework.
 
-The repository currently contains the minimal native GPUI application shell. Product workspace, terminal, agent, and Git isolation features have not been implemented yet.
+The repository contains the native GPUI application shell and SQLite persistence for Void's workspace, repositories, and managed branch/worktree records. Terminal, agent, repository-discovery, and Git-operation features have not been implemented yet.
 
 ## Prerequisites
 
@@ -37,7 +37,8 @@ cargo test --workspace
 ```text
 .
 ├── crates/
-│   └── void/          # Thin native application crate and composition root
+│   ├── void/          # Thin native application crate and composition root
+│   └── workspace/     # Application paths and workspace-domain persistence
 ├── docs/
 │   ├── architecture.md
 │   └── decisions/     # Durable architecture decision records
@@ -60,6 +61,20 @@ The scaffold is aligned with:
 - Zed's root `Cargo.toml`, `rust-toolchain.toml`, and `rustfmt.toml`.
 
 GPUI is pre-1.0 and changes frequently. The dependency revision is therefore pinned; update it only through an explicit, documented compatibility change.
+
+## Local data
+
+Void stores local state beneath the platform application-data directory:
+
+```text
+Void/
+├── void.db
+└── worktrees/
+    └── <repository name>/
+        └── <allocated branch name>/
+```
+
+Git branch separators are flattened only in the directory name, so `feature/auth` uses `feature-auth`. Existing and archived names or paths receive `-2`, `-3`, and later suffixes instead of being reused. The database schema and invariants are documented in [`docs/decisions/0002-persist-workspace-repository-branches.md`](docs/decisions/0002-persist-workspace-repository-branches.md).
 
 ## License
 

@@ -1,13 +1,14 @@
 //! Selectable, closable, draggable tabs for open Void branches.
 
 use gpui::{
-    Context, EventEmitter, MouseButton, MouseUpEvent, Render, Window, div, prelude::*, px, rgb,
+    Context, EventEmitter, MouseButton, MouseDownEvent, MouseUpEvent, Render, Window, div,
+    prelude::*, px, rgb,
 };
 use workspace::{Branch, BranchId};
 
 use crate::{icons::icon_sized, theme};
 
-const HEADER_HEIGHT: f32 = 37.5;
+pub(crate) const HEADER_HEIGHT: f32 = 37.5;
 const TAB_WIDTH: f32 = 165.0;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -99,6 +100,10 @@ impl BranchHeader {
         cx.emit(BranchSelected { branch_id });
     }
 
+    fn stop_titlebar_drag(&mut self, _: &MouseDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+        cx.stop_propagation();
+    }
+
     fn close_branch(
         &mut self,
         branch_id: BranchId,
@@ -154,8 +159,6 @@ impl Render for BranchHeader {
             .h(px(HEADER_HEIGHT))
             .flex_none()
             .overflow_x_scroll()
-            .border_b_1()
-            .border_color(rgb(theme::BORDER_VARIANT))
             .children(self.branches.iter().enumerate().map(|(index, branch)| {
                 let branch_id = branch.id;
                 let is_active = self.active_branch_id == Some(branch_id);
@@ -184,9 +187,21 @@ impl Render for BranchHeader {
                         theme::TEXT_MUTED
                     }))
                     .cursor_pointer()
+                    .on_mouse_down(MouseButton::Left, cx.listener(Self::stop_titlebar_drag))
                     .when(is_active, |tab| tab.bg(rgb(theme::SURFACE)))
                     .when(!is_active, |tab| {
                         tab.hover(|tab| tab.bg(rgb(theme::ELEMENT_HOVER)))
+                    })
+                    .when(!is_active, |tab| {
+                        tab.child(
+                            div()
+                                .absolute()
+                                .left_0()
+                                .right_0()
+                                .bottom_0()
+                                .h(px(1.))
+                                .bg(rgb(theme::BORDER_VARIANT)),
+                        )
                     })
                     .on_mouse_up(
                         MouseButton::Left,
@@ -222,6 +237,7 @@ impl Render for BranchHeader {
                             .opacity(0.)
                             .group_hover("branch-tab", |button| button.opacity(1.))
                             .hover(|button| button.bg(rgb(theme::ELEMENT_HOVER)))
+                            .on_mouse_down(MouseButton::Left, cx.listener(Self::stop_titlebar_drag))
                             .on_mouse_up(
                                 MouseButton::Left,
                                 cx.listener(move |this, event, window, cx| {
@@ -231,6 +247,14 @@ impl Render for BranchHeader {
                             .child(icon_sized("icons/x.svg", 12., theme::TEXT_MUTED)),
                     )
             }))
+            .child(
+                div()
+                    .h_full()
+                    .min_w(px(1.))
+                    .flex_1()
+                    .border_b_1()
+                    .border_color(rgb(theme::BORDER_VARIANT)),
+            )
     }
 }
 

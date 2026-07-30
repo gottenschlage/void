@@ -1,11 +1,11 @@
 //! GPUI application startup and the initial workspace.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, time::Duration};
 
 use gpui::{
-    App, Bounds, Context, Entity, Focusable, KeyBinding, MouseButton, MouseUpEvent, Role,
-    Subscription, Window, WindowBounds, WindowOptions, actions, deferred, div, prelude::*, px, rgb,
-    size,
+    Animation, AnimationExt, App, Bounds, Context, Entity, Focusable, KeyBinding, MouseButton,
+    MouseDownEvent, MouseUpEvent, Role, Subscription, TitlebarOptions, Window, WindowBounds,
+    WindowControlArea, WindowOptions, actions, deferred, div, point, prelude::*, px, rgb, size,
 };
 use gpui_platform::application;
 use void_terminal::{BranchTerminalPanel, TerminalSettings};
@@ -14,7 +14,8 @@ use workspace::{Branch, BranchId, VoidPaths, Workspace, WorkspaceDb};
 use crate::{
     assets::Assets,
     branch_dialog::{BranchDialog, BranchDialogEvent, CancelBranch, ConfirmBranch},
-    branch_header::{BranchClosed, BranchHeader, BranchSelected},
+    branch_header::{BranchClosed, BranchHeader, BranchSelected, HEADER_HEIGHT},
+    icons::icon_sized,
     sidebar::{AddBranchRequested, BranchArchived, Sidebar, SidebarRepository},
     text_input::{
         Backspace, Copy, Cut, Delete, Left, Paste, Right, SelectAll, SelectLeft, SelectRight,
@@ -26,6 +27,11 @@ use crate::{
 
 const INITIAL_WINDOW_WIDTH: f32 = 1_300.0;
 const INITIAL_WINDOW_HEIGHT: f32 = 850.0;
+const SIDEBAR_WIDTH: f32 = 240.0;
+const COLLAPSED_TITLEBAR_WIDTH: f32 = 48.0;
+const TITLEBAR_TRANSITION: Duration = Duration::from_millis(200);
+const TRAFFIC_LIGHT_X: f32 = 16.0;
+const TRAFFIC_LIGHT_Y: f32 = 11.0;
 
 actions!(workspace_onboarding, [Submit]);
 
@@ -115,6 +121,16 @@ pub(crate) fn run() {
         let window = cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
+                #[cfg(target_os = "macos")]
+                titlebar: Some(TitlebarOptions {
+                    title: None,
+                    appears_transparent: true,
+                    traffic_light_position: Some(point(px(TRAFFIC_LIGHT_X), px(TRAFFIC_LIGHT_Y))),
+                }),
+                #[cfg(target_os = "macos")]
+                is_movable: true,
+                #[cfg(target_os = "macos")]
+                app_owns_titlebar_drag: true,
                 ..WindowOptions::default()
             },
             move |window, cx| {
@@ -175,6 +191,11 @@ struct VoidRoot {
     updater: Entity<Updater>,
     error: Option<String>,
     is_creating: bool,
+    sidebar_open: bool,
+    sidebar_animation_generation: usize,
+    should_move_window: bool,
+    was_fullscreen: bool,
+    window_bounds_subscription: Option<Subscription>,
 }
 
 impl VoidRoot {
@@ -207,6 +228,11 @@ impl VoidRoot {
             updater,
             error: None,
             is_creating: false,
+            sidebar_open: default_sidebar_open(),
+            sidebar_animation_generation: 0,
+            should_move_window: false,
+            was_fullscreen: window.is_fullscreen(),
+            window_bounds_subscription: None,
         };
         if let Some(sidebar) = sidebar {
             this.attach_sidebar(sidebar, window, cx);
@@ -221,7 +247,158 @@ impl VoidRoot {
         {
             this.select_branch(branch_id, window, cx);
         }
+        this.sync_traffic_lights(window);
+        this.window_bounds_subscription =
+            Some(cx.observe_window_bounds(window, |this, window, cx| {
+                let fullscreen = window.is_fullscreen();
+                if fullscreen != this.was_fullscreen {
+                    this.was_fullscreen = fullscreen;
+                    this.sync_traffic_lights(window);
+                    cx.notify();
+                }
+            }));
         this
+    }
+
+    fn toggle_sidebar(&mut self, _: &MouseUpEvent, window: &mut Window, cx: &mut Context<Self>) {
+        self.sidebar_open = !self.sidebar_open;
+        self.sidebar_animation_generation = self.sidebar_animation_generation.wrapping_add(1);
+        self.sync_traffic_lights(window);
+        cx.stop_propagation();
+        cx.notify();
+    }
+
+    fn stop_titlebar_drag(&mut self, _: &MouseDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+        self.should_move_window = false;
+        cx.stop_propagation();
+    }
+
+    fn titlebar_mouse_down(&mut self, _: &MouseDownEvent, _: &mut Window, _: &mut Context<Self>) {
+        self.should_move_window = true;
+    }
+
+    fn titlebar_mouse_move(
+        &mut self,
+        _: &gpui::MouseMoveEvent,
+        window: &mut Window,
+        _: &mut Context<Self>,
+    ) {
+        if self.should_move_window {
+            self.should_move_window = false;
+            window.start_window_move();
+        }
+    }
+
+    fn sync_traffic_lights(&self, window: &Window) {
+        #[cfg(target_os = "macos")]
+        {
+            let visible = traffic_lights_visible(self.sidebar_open, window.is_fullscreen());
+            if let Err(error) = crate::macos_title_bar::set_traffic_lights_visible(window, visible)
+            {
+                eprintln!("could not update macOS traffic-light visibility: {error}");
+            }
+            if visible {
+                window.set_traffic_light_position(point(px(TRAFFIC_LIGHT_X), px(TRAFFIC_LIGHT_Y)));
+            }
+        }
+    }
+
+    fn render_titlebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let sidebar_open = self.sidebar_open;
+        let generation = self.sidebar_animation_generation;
+        let has_sidebar = self.sidebar.is_some();
+        let start_width = if generation == 0 {
+            titlebar_leading_width(sidebar_open)
+        } else if sidebar_open {
+            COLLAPSED_TITLEBAR_WIDTH
+        } else {
+            SIDEBAR_WIDTH
+        };
+        let end_width = titlebar_leading_width(sidebar_open);
+
+        div()
+            .id("void-titlebar")
+            .window_control_area(WindowControlArea::Drag)
+            .flex()
+            .h(px(HEADER_HEIGHT))
+            .flex_none()
+            .bg(rgb(theme::SURFACE))
+            .on_mouse_down(MouseButton::Left, cx.listener(Self::titlebar_mouse_down))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _, _, _| this.should_move_window = false),
+            )
+            .on_mouse_move(cx.listener(Self::titlebar_mouse_move))
+            .on_click(|event, window, _| {
+                if event.click_count() == 2 {
+                    window.titlebar_double_click();
+                }
+            })
+            .child(
+                div()
+                    .id(("titlebar-leading", generation))
+                    .flex()
+                    .flex_none()
+                    .h_full()
+                    .items_center()
+                    .justify_end()
+                    .pr_2()
+                    .overflow_hidden()
+                    .border_b_1()
+                    .border_r_1()
+                    .border_color(rgb(theme::BORDER_VARIANT))
+                    .child(
+                        div()
+                            .id("toggle-sidebar")
+                            .focusable()
+                            .tab_stop(true)
+                            .role(Role::Button)
+                            .aria_label(if sidebar_open {
+                                "Close sidebar"
+                            } else {
+                                "Open sidebar"
+                            })
+                            .flex()
+                            .size(px(28.))
+                            .items_center()
+                            .justify_center()
+                            .rounded_sm()
+                            .when(has_sidebar, |button| {
+                                button
+                                    .cursor_pointer()
+                                    .hover(|button| button.bg(rgb(theme::ELEMENT_HOVER)))
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(Self::stop_titlebar_drag),
+                                    )
+                                    .on_mouse_up(
+                                        MouseButton::Left,
+                                        cx.listener(Self::toggle_sidebar),
+                                    )
+                            })
+                            .when(!has_sidebar, |button| button.opacity(0.35))
+                            .child(icon_sized("icons/panel-left.svg", 16., theme::TEXT_MUTED)),
+                    )
+                    .with_animation(
+                        ("sidebar-titlebar-width", generation),
+                        Animation::new(TITLEBAR_TRANSITION),
+                        move |element, delta| {
+                            element.w(px(interpolate_width(start_width, end_width, delta)))
+                        },
+                    ),
+            )
+            .when_some(self.branch_header.clone(), |titlebar, header| {
+                titlebar.child(div().min_w_0().flex_1().h_full().child(header))
+            })
+            .when(self.branch_header.is_none(), |titlebar| {
+                titlebar.child(
+                    div()
+                        .flex_1()
+                        .h_full()
+                        .border_b_1()
+                        .border_color(rgb(theme::BORDER_VARIANT)),
+                )
+            })
     }
 
     fn attach_sidebar(
@@ -483,27 +660,56 @@ impl Render for VoidRoot {
         let active_panel = self
             .active_branch_id
             .and_then(|branch_id| self.branch_panels.get(&branch_id).cloned());
+        let sidebar_open = self.sidebar_open;
+        let generation = self.sidebar_animation_generation;
+        let sidebar_end_width = if sidebar_open { SIDEBAR_WIDTH } else { 0.0 };
+        let sidebar_start_width = if generation == 0 {
+            sidebar_end_width
+        } else if sidebar_open {
+            0.0
+        } else {
+            SIDEBAR_WIDTH
+        };
         div()
             .flex()
+            .flex_col()
             .size_full()
             .bg(rgb(theme::EDITOR_BACKGROUND))
             .text_color(rgb(theme::TEXT))
             .font_family(theme::UI_FONT)
             .text_size(px(theme::UI_FONT_SIZE))
-            .when_some(self.sidebar.clone(), |view, sidebar| {
-                view.child(sidebar).child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .flex_1()
-                        .when_some(self.branch_header.clone(), |content, header| {
-                            content.child(header)
-                        })
+            .child(self.render_titlebar(cx))
+            .child(
+                div()
+                    .flex()
+                    .flex_1()
+                    .min_h_0()
+                    .when_some(self.sidebar.clone(), |body, sidebar| {
+                        body.child(
+                            div()
+                                .id(("sidebar-width", generation))
+                                .flex()
+                                .flex_none()
+                                .h_full()
+                                .overflow_hidden()
+                                .child(sidebar)
+                                .with_animation(
+                                    ("sidebar-body-width", generation),
+                                    Animation::new(TITLEBAR_TRANSITION),
+                                    move |element, delta| {
+                                        element.w(px(interpolate_width(
+                                            sidebar_start_width,
+                                            sidebar_end_width,
+                                            delta,
+                                        )))
+                                    },
+                                ),
+                        )
                         .child(
                             div()
                                 .flex()
                                 .flex_1()
-                                .min_h_0()
+                                .min_w_0()
                                 .items_center()
                                 .justify_center()
                                 .text_color(rgb(theme::TEXT_MUTED))
@@ -513,14 +719,14 @@ impl Render for VoidRoot {
                                 .when(self.active_branch_id.is_none(), |content| {
                                     content.child("Select a branch")
                                 }),
-                        ),
-                )
-            })
-            .when(self.workspace.is_none(), |view| {
-                view.items_center()
-                    .justify_center()
-                    .child(self.render_onboarding(cx))
-            })
+                        )
+                    })
+                    .when(self.workspace.is_none(), |body| {
+                        body.items_center()
+                            .justify_center()
+                            .child(self.render_onboarding(cx))
+                    }),
+            )
             .when_some(self.branch_dialog.clone(), |view, dialog| {
                 view.child(
                     deferred(
@@ -538,5 +744,58 @@ impl Render for VoidRoot {
                 )
             })
             .child(self.updater.clone())
+    }
+}
+
+fn interpolate_width(start: f32, end: f32, delta: f32) -> f32 {
+    start + (end - start) * delta.clamp(0.0, 1.0)
+}
+
+fn default_sidebar_open() -> bool {
+    true
+}
+
+fn titlebar_leading_width(sidebar_open: bool) -> f32 {
+    if sidebar_open {
+        SIDEBAR_WIDTH
+    } else {
+        COLLAPSED_TITLEBAR_WIDTH
+    }
+}
+
+fn traffic_lights_visible(sidebar_open: bool, fullscreen: bool) -> bool {
+    sidebar_open || fullscreen
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        COLLAPSED_TITLEBAR_WIDTH, SIDEBAR_WIDTH, default_sidebar_open, interpolate_width,
+        titlebar_leading_width, traffic_lights_visible,
+    };
+
+    #[test]
+    fn sidebar_defaults_and_width_end_states_are_stable() {
+        assert!(default_sidebar_open());
+        assert_eq!(titlebar_leading_width(true), SIDEBAR_WIDTH);
+        assert_eq!(titlebar_leading_width(false), COLLAPSED_TITLEBAR_WIDTH);
+        assert_eq!(interpolate_width(0.0, SIDEBAR_WIDTH, 0.0), 0.0);
+        assert_eq!(interpolate_width(0.0, SIDEBAR_WIDTH, 1.0), SIDEBAR_WIDTH);
+        assert_eq!(interpolate_width(SIDEBAR_WIDTH, 0.0, 1.0), 0.0);
+    }
+
+    #[test]
+    fn interpolation_clamps_to_reduced_motion_end_state() {
+        assert_eq!(
+            interpolate_width(0.0, SIDEBAR_WIDTH, f32::INFINITY),
+            SIDEBAR_WIDTH
+        );
+    }
+
+    #[test]
+    fn traffic_lights_follow_sidebar_and_fullscreen_policy() {
+        assert!(traffic_lights_visible(true, false));
+        assert!(!traffic_lights_visible(false, false));
+        assert!(traffic_lights_visible(false, true));
     }
 }

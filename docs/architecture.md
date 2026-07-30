@@ -26,7 +26,7 @@ The current native startup flow is:
 5. Void computes centered initial window bounds and calls `App::open_window`.
 6. The window callback creates `VoidRoot` as a GPUI-owned entity through `Context::new`.
 7. With no workspace, `VoidRoot` renders a focused name input and persists the submitted workspace asynchronously.
-8. With a workspace, `VoidRoot` renders the repository sidebar, branch header, and branch-content placeholder.
+8. With a workspace, `VoidRoot` renders an integrated native title-bar row above the repository sidebar and branch content.
 9. Void activates the application after window creation.
 10. If database or initial-window creation fails, Void reports the error and stops rather than panicking.
 
@@ -37,6 +37,39 @@ No process ownership, terminals, or agents exist yet.
 The absence of a workspace record is the onboarding state; no separate preference or completion flag exists. The first screen asks only for a non-empty workspace name. Submission is available from Enter and the create button, and the database write runs outside rendering. Once the write completes, the same root entity transitions to the main-screen placeholder and displays the persisted name.
 
 The small single-line input in `crates/void/src/text_input.rs` follows GPUI's official input example and implements `EntityInputHandler`, UTF-8/UTF-16 conversion, selection, clipboard actions, platform composition, focus, and accessibility semantics. It is local to the binary until repeated form needs justify a shared UI component.
+
+## Native window shell
+
+On macOS, Void asks GPUI for a transparent native title bar and full-size
+content while retaining AppKit's `NSWindow` frame, shadow, rounded corners,
+resize behavior, and standard close/minimize/zoom buttons. GPUI positions those
+buttons at `(16, 11)`. Void owns title-bar dragging:
+`WindowControlArea::Drag` identifies the background, movement begins through
+`Window::start_window_move` only after a left-button move, and double clicks
+delegate to `Window::titlebar_double_click`. Mouse-down propagation stops at
+the sidebar toggle, branch tabs, close buttons, and tab drag surfaces.
+
+`VoidRoot` owns session-only `sidebar_open` state, initially `true`. The fixed
+37.5 px title row has a 240 px leading segment while open and a 48 px segment
+while closed. Its remaining width belongs to the existing 165 px branch tabs
+and draggable empty space. The body is a separate row. Collapsing animates only
+the clipping widths over 200 ms with linear easing; GPUI's `AnimationExt`
+automatically renders the end state when reduced motion is enabled. Sidebar,
+branch-header, and terminal-panel entities remain owned by the root throughout,
+so collapse cannot reset terminal processes, active selection, or tab order.
+
+GPUI exposes traffic-light position but not visibility at the pinned revision.
+The macOS-only adapter in `crates/void/src/macos_title_bar.rs` uses GPUI's public
+`raw-window-handle` AppKit `NSView`, obtains its containing `NSWindow`, and sets
+the three standard buttons' `hidden` property. The sole pointer cast is valid
+only because GPUI owns the view for the window lifetime and invokes this code
+synchronously on AppKit's main thread. Adapter failures are nonfatal and leave
+the native controls visible. Open means visible, closed means hidden, and
+fullscreen always means visible; window-bounds observation reapplies that
+policy across fullscreen transitions.
+
+Non-macOS window options retain GPUI defaults. See
+[`decisions/0004-native-macos-integrated-title-bar.md`](decisions/0004-native-macos-integrated-title-bar.md).
 
 ## Main shell and repository onboarding
 
@@ -203,6 +236,9 @@ failures retain their reason and expose one retry interaction. See
 
 Product behavior and styling were verified against:
 
+- `/Users/usama/Documents/archive/sunware/apps/desktop/src/main/index.ts`
+- `/Users/usama/Documents/archive/sunware/apps/desktop/src/renderer/src/screens/workspace/index.tsx`
+- `/Users/usama/Documents/archive/sunware/apps/desktop/src/renderer/src/screens/workspace/components/tab-bar.tsx`
 - `/Users/usama/Documents/archive/others/sunware/apps/desktop/src/renderer/components/sidebar/project-manager.tsx`
 - `/Users/usama/Documents/archive/others/sunware/apps/desktop/src/renderer/components/sidebar/project-list.tsx`
 - `/Users/usama/Documents/archive/others/sunware/apps/desktop/src/renderer/components/ui/sidebar.tsx`
@@ -210,6 +246,9 @@ Product behavior and styling were verified against:
 
 Verified against local Zed commit `5e549b871fb87d1038d9b1b242bf7d4d4e3b4d8f`:
 
+- `crates/zed/src/zed.rs::build_window_options` — transparent custom-title-bar window configuration and drag ownership.
+- `crates/platform_title_bar/src/platform_title_bar.rs::PlatformTitleBar::render` — drag initiation, double-click delegation, and control input boundaries.
+- `crates/gpui_macos/src/window.rs::{MacWindow::new, HasWindowHandle for MacWindow}` — native title-bar setup and the `NSView` raw-handle contract.
 - `crates/gpui/README.md` — standalone application setup and platform features.
 - `crates/gpui/examples/hello_world.rs` — window creation and root rendering.
 - `crates/gpui/examples/input.rs` — focus, key actions, platform text input, selection, and painting.

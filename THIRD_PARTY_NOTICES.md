@@ -39,6 +39,11 @@ All entries below use the Zed revision recorded above.
   lifecycle implementations under `crates/void` adapt the Zed and GPUI
   sources identified in `docs/architecture.md` and the decision records under
   `docs/decisions`.
+- The integrated title-bar movement and input-ownership pattern in
+  `crates/void/src/application.rs` adapts Zed's `platform_title_bar` behavior.
+  The target-only `raw-window-handle` and `objc2-app-kit` crates are used by
+  `crates/void/src/macos_title_bar.rs`; both permit distribution with Void
+  under their Apache-2.0/MIT-compatible terms.
 
 When additional Zed code is copied or substantially adapted, this map must be
 updated in the same change with the exact Void and upstream paths. Existing

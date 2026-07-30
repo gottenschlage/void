@@ -2,14 +2,14 @@ use std::collections::HashSet;
 
 use gpui::{
     Anchor, Context, EventEmitter, MouseButton, MouseDownEvent, MouseUpEvent, PathPromptOptions,
-    Role, Window, anchored, deferred, div, prelude::*, px, rgb,
+    Role, Window, anchored, deferred, div, point, prelude::*, px, rgb,
 };
 use workspace::{
     Branch, BranchId, NewRepository, Repository, RepositoryId, Workspace, WorkspaceDb,
     inspect_git_repository,
 };
 
-use crate::branch_header::BranchSelected;
+use crate::branch_header::{BranchSelected, HEADER_HEIGHT};
 use crate::{icons::icon, theme};
 
 pub(crate) struct AddBranchRequested {
@@ -498,134 +498,147 @@ impl Sidebar {
 
     fn render_workspace_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
         deferred(
-            anchored().anchor(Anchor::BottomLeft).child(
-                div()
-                    .mt_1()
-                    .w(px(224.))
-                    .p_1()
-                    .rounded_md()
-                    .bg(rgb(theme::ELEVATED_SURFACE))
-                    .border_1()
-                    .border_color(rgb(theme::BORDER))
-                    .shadow_md()
-                    .on_mouse_down_out(cx.listener(Self::dismiss_menu))
-                    .children(
-                        self.repositories
-                            .iter()
-                            .filter(|entry| entry.repository.archived_at.is_none())
-                            .map(|entry| {
-                                let repository_id = entry.repository.id;
-                                let is_pinned = entry.repository.is_pinned;
-                                let is_updating =
-                                    self.updating_repositories.contains(&repository_id);
-                                let dragged = DraggedRepository {
-                                    id: repository_id,
-                                    name: entry.repository.name.clone(),
-                                };
-                                div()
-                                    .id(("workspace-repository", repository_id.as_i64() as u64))
-                                    .group("workspace-repository")
-                                    .flex()
-                                    .h(px(32.))
-                                    .items_center()
-                                    .gap_1()
-                                    .px_2()
-                                    .rounded_sm()
-                                    .text_sm()
-                                    .when(is_updating, |row| row.opacity(0.5))
-                                    .when(!is_updating, |row| {
-                                        row.hover(|row| row.bg(rgb(theme::ELEMENT_HOVER)))
-                                    })
-                                    .drag_over::<DraggedRepository>(|row, _, _, _| {
-                                        row.border_b_2().border_color(rgb(theme::ACCENT))
-                                    })
-                                    .on_drop(cx.listener(move |this, dragged, window, cx| {
-                                        this.drop_repository(dragged, repository_id, window, cx);
-                                    }))
-                                    .child(
-                                        div()
-                                            .id((
-                                                "workspace-repository-drag-handle",
-                                                repository_id.as_i64() as u64,
-                                            ))
-                                            .flex_1()
-                                            .overflow_hidden()
-                                            .whitespace_nowrap()
-                                            .cursor_grab()
-                                            .on_drag(dragged, |dragged, _, _, cx| {
-                                                cx.new(|_| dragged.clone())
-                                            })
-                                            .child(entry.repository.name.clone()),
-                                    )
-                                    .child(
-                                        div()
-                                            .id((
-                                                "pin-workspace-repository",
-                                                repository_id.as_i64() as u64,
-                                            ))
-                                            .flex()
-                                            .size(px(24.))
-                                            .items_center()
-                                            .justify_center()
-                                            .rounded_sm()
-                                            .cursor_pointer()
-                                            .hover(|button| button.bg(rgb(theme::ELEMENT_ACTIVE)))
-                                            .on_mouse_up(
-                                                MouseButton::Left,
-                                                cx.listener(move |this, _, window, cx| {
-                                                    cx.stop_propagation();
-                                                    if !is_updating {
-                                                        this.set_repository_pinned(
-                                                            repository_id,
-                                                            !is_pinned,
-                                                            window,
-                                                            cx,
-                                                        );
-                                                    }
-                                                }),
-                                            )
-                                            .child(icon(if is_pinned {
-                                                "icons/pin-off.svg"
-                                            } else {
-                                                "icons/pin.svg"
-                                            })),
-                                    )
-                                    .child(
-                                        div()
-                                            .id((
-                                                "archive-workspace-repository",
-                                                repository_id.as_i64() as u64,
-                                            ))
-                                            .flex()
-                                            .size(px(24.))
-                                            .items_center()
-                                            .justify_center()
-                                            .rounded_sm()
-                                            .cursor_pointer()
-                                            .hover(|button| button.bg(rgb(theme::ELEMENT_ACTIVE)))
-                                            .on_mouse_up(
-                                                MouseButton::Left,
-                                                cx.listener(move |this, _, window, cx| {
-                                                    cx.stop_propagation();
-                                                    if !is_updating {
-                                                        this.archive_repository(
-                                                            repository_id,
-                                                            window,
-                                                            cx,
-                                                        );
-                                                    }
-                                                }),
-                                            )
-                                            .child(icon("icons/archive.svg")),
-                                    )
-                            }),
-                    )
-                    .when(
-                        self.repositories
-                            .iter()
-                            .any(|entry| entry.repository.archived_at.is_some()),
-                        |menu| {
-                            menu.child(div().h(px(1.)).mx_1().my_1().bg(rgb(theme::BORDER_VARIANT)))
+            anchored()
+                .anchor(Anchor::TopLeft)
+                .position(point(px(8.0), px(HEADER_HEIGHT + 60.0)))
+                .child(
+                    div()
+                        .w(px(224.))
+                        .p_1()
+                        .rounded_md()
+                        .bg(rgb(theme::ELEVATED_SURFACE))
+                        .border_1()
+                        .border_color(rgb(theme::BORDER))
+                        .shadow_md()
+                        .on_mouse_down_out(cx.listener(Self::dismiss_menu))
+                        .children(
+                            self.repositories
+                                .iter()
+                                .filter(|entry| entry.repository.archived_at.is_none())
+                                .map(|entry| {
+                                    let repository_id = entry.repository.id;
+                                    let is_pinned = entry.repository.is_pinned;
+                                    let is_updating =
+                                        self.updating_repositories.contains(&repository_id);
+                                    let dragged = DraggedRepository {
+                                        id: repository_id,
+                                        name: entry.repository.name.clone(),
+                                    };
+                                    div()
+                                        .id(("workspace-repository", repository_id.as_i64() as u64))
+                                        .group("workspace-repository")
+                                        .flex()
+                                        .h(px(32.))
+                                        .items_center()
+                                        .gap_1()
+                                        .px_2()
+                                        .rounded_sm()
+                                        .text_sm()
+                                        .when(is_updating, |row| row.opacity(0.5))
+                                        .when(!is_updating, |row| {
+                                            row.hover(|row| row.bg(rgb(theme::ELEMENT_HOVER)))
+                                        })
+                                        .drag_over::<DraggedRepository>(|row, _, _, _| {
+                                            row.border_b_2().border_color(rgb(theme::ACCENT))
+                                        })
+                                        .on_drop(cx.listener(move |this, dragged, window, cx| {
+                                            this.drop_repository(
+                                                dragged,
+                                                repository_id,
+                                                window,
+                                                cx,
+                                            );
+                                        }))
+                                        .child(
+                                            div()
+                                                .id((
+                                                    "workspace-repository-drag-handle",
+                                                    repository_id.as_i64() as u64,
+                                                ))
+                                                .flex_1()
+                                                .overflow_hidden()
+                                                .whitespace_nowrap()
+                                                .cursor_grab()
+                                                .on_drag(dragged, |dragged, _, _, cx| {
+                                                    cx.new(|_| dragged.clone())
+                                                })
+                                                .child(entry.repository.name.clone()),
+                                        )
+                                        .child(
+                                            div()
+                                                .id((
+                                                    "pin-workspace-repository",
+                                                    repository_id.as_i64() as u64,
+                                                ))
+                                                .flex()
+                                                .size(px(24.))
+                                                .items_center()
+                                                .justify_center()
+                                                .rounded_sm()
+                                                .cursor_pointer()
+                                                .hover(|button| {
+                                                    button.bg(rgb(theme::ELEMENT_ACTIVE))
+                                                })
+                                                .on_mouse_up(
+                                                    MouseButton::Left,
+                                                    cx.listener(move |this, _, window, cx| {
+                                                        cx.stop_propagation();
+                                                        if !is_updating {
+                                                            this.set_repository_pinned(
+                                                                repository_id,
+                                                                !is_pinned,
+                                                                window,
+                                                                cx,
+                                                            );
+                                                        }
+                                                    }),
+                                                )
+                                                .child(icon(if is_pinned {
+                                                    "icons/pin-off.svg"
+                                                } else {
+                                                    "icons/pin.svg"
+                                                })),
+                                        )
+                                        .child(
+                                            div()
+                                                .id((
+                                                    "archive-workspace-repository",
+                                                    repository_id.as_i64() as u64,
+                                                ))
+                                                .flex()
+                                                .size(px(24.))
+                                                .items_center()
+                                                .justify_center()
+                                                .rounded_sm()
+                                                .cursor_pointer()
+                                                .hover(|button| {
+                                                    button.bg(rgb(theme::ELEMENT_ACTIVE))
+                                                })
+                                                .on_mouse_up(
+                                                    MouseButton::Left,
+                                                    cx.listener(move |this, _, window, cx| {
+                                                        cx.stop_propagation();
+                                                        if !is_updating {
+                                                            this.archive_repository(
+                                                                repository_id,
+                                                                window,
+                                                                cx,
+                                                            );
+                                                        }
+                                                    }),
+                                                )
+                                                .child(icon("icons/archive.svg")),
+                                        )
+                                }),
+                        )
+                        .when(
+                            self.repositories
+                                .iter()
+                                .any(|entry| entry.repository.archived_at.is_some()),
+                            |menu| {
+                                menu.child(
+                                    div().h(px(1.)).mx_1().my_1().bg(rgb(theme::BORDER_VARIANT)),
+                                )
                                 .children(
                                     self.repositories
                                         .iter()
@@ -695,34 +708,34 @@ impl Sidebar {
                                                 )
                                         }),
                                 )
-                        },
-                    )
-                    .child(div().h(px(1.)).mx_1().my_1().bg(rgb(theme::BORDER_VARIANT)))
-                    .child(
-                        div()
-                            .id("add-repository")
-                            .focusable()
-                            .tab_stop(true)
-                            .role(Role::Button)
-                            .aria_label("Add repository")
-                            .flex()
-                            .h(px(32.))
-                            .items_center()
-                            .gap_2()
-                            .px_2()
-                            .rounded_sm()
-                            .text_sm()
-                            .cursor_pointer()
-                            .hover(|item| item.bg(rgb(theme::ELEMENT_HOVER)))
-                            .on_mouse_up(MouseButton::Left, cx.listener(Self::add_repository))
-                            .child(icon("icons/plus.svg"))
-                            .child(if self.is_adding_repository {
-                                "Adding repository…"
-                            } else {
-                                "Add repository"
-                            }),
-                    ),
-            ),
+                            },
+                        )
+                        .child(div().h(px(1.)).mx_1().my_1().bg(rgb(theme::BORDER_VARIANT)))
+                        .child(
+                            div()
+                                .id("add-repository")
+                                .focusable()
+                                .tab_stop(true)
+                                .role(Role::Button)
+                                .aria_label("Add repository")
+                                .flex()
+                                .h(px(32.))
+                                .items_center()
+                                .gap_2()
+                                .px_2()
+                                .rounded_sm()
+                                .text_sm()
+                                .cursor_pointer()
+                                .hover(|item| item.bg(rgb(theme::ELEMENT_HOVER)))
+                                .on_mouse_up(MouseButton::Left, cx.listener(Self::add_repository))
+                                .child(icon("icons/plus.svg"))
+                                .child(if self.is_adding_repository {
+                                    "Adding repository…"
+                                } else {
+                                    "Add repository"
+                                }),
+                        ),
+                ),
         )
         .with_priority(1)
     }

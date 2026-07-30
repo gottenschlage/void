@@ -1,0 +1,21 @@
+[workspace]
+resolver = "2"
+members = ["crates/void"]
+default-members = ["crates/void"]
+
+[workspace.package]
+edition = "2024"
+license = "GPL-3.0-only"
+publish = false
+
+[workspace.dependencies]
+gpui = { git = "https://github.com/zed-industries/zed", rev = "5e549b871fb87d1038d9b1b242bf7d4d4e3b4d8f", default-features = false }
+gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "5e549b871fb87d1038d9b1b242bf7d4d4e3b4d8f", default-features = false }
+
+[workspace.lints.rust]
+unexpected_cfgs = { level = "allow" }
+
+[workspace.lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+redundant_clone = "deny"

@@ -25,6 +25,64 @@ cargo run -p void
 
 A successful run opens a centered `1300 × 850` Void workspace window.
 
+## Install
+
+Published releases currently support Apple-silicon Macs. Download
+`Void-aarch64.dmg` from the latest GitHub Release, open it, and drag **Void** to
+**Applications**. Release builds are signed with a Developer ID certificate and
+notarized by Apple.
+
+Void checks the dedicated stable feed at
+<https://github.com/usamaasfar/void/releases/latest/download/update.json> at
+startup and hourly. It streams the DMG through GPUI's HTTP client, authenticates
+its SHA-256 checksum and Apple signing identity, validates its bundle metadata
+and arm64 executable, then installs it in the background. Automatic feed
+failures remain quiet and retry hourly; download or installation failures show
+one **Retry** interaction with the reason. Development builds and binaries run
+outside a `.app` bundle never update themselves.
+
+## Release
+
+Follow the complete one-time setup and per-release checklist in
+[`docs/how-to/release.md`](docs/how-to/release.md). The summary below describes
+the repository contract.
+
+A release is triggered only by pushing a semantic-version tag matching
+`v*.*.*`. The tag must equal the `crates/void` package version; for example,
+package version `0.1.0` releases from tag `v0.1.0`.
+
+Configure these GitHub Actions secrets before pushing the first release tag:
+
+- `APPLE_CERTIFICATE_P12_BASE64`: base64-encoded Developer ID Application
+  certificate and private key in PKCS#12 format;
+- `APPLE_CERTIFICATE_PASSWORD`: password for that PKCS#12 file;
+- `KEYCHAIN_PASSWORD`: an ephemeral CI keychain password;
+- `APPLE_SIGNING_IDENTITY`: full Developer ID Application identity;
+- `APPLE_API_KEY`: App Store Connect API private key contents;
+- `APPLE_API_KEY_ID`: App Store Connect key ID;
+- `APPLE_API_ISSUER_ID`: App Store Connect issuer ID.
+
+Also configure the public repository variable `APPLE_TEAM_ID` with the exact
+10-character Team ID that owns the Developer ID certificate. The value is
+compiled into release builds and is used to reject updates signed by any other
+team.
+
+After bumping and committing the package version, create and push the exact
+matching stable tag:
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The workflow runs all repository checks, creates `Void.app` with bundle
+identifier `com.void.desktop`, signs it with hardened runtime, builds and
+notarizes `Void-aarch64.dmg`, and publishes the DMG, its human-readable
+`Void-aarch64.dmg.sha256`, and `update.json` as a GitHub Release. Publication is
+gated on signature verification, notarization, stapling, Gatekeeper assessment,
+manifest generation, and the repository checks. Do not create the release
+manually.
+
 ## Validate
 
 ```sh
@@ -46,6 +104,10 @@ cargo test --workspace
 ├── docs/
 │   ├── architecture.md
 │   └── decisions/     # Durable architecture decision records
+├── script/
+│   └── bundle-mac     # macOS bundle, signing, DMG, and notarization
+├── .github/workflows/
+│   └── release.yml    # tag-only stable release workflow
 ├── Cargo.toml         # Workspace members, shared dependencies, and lints
 └── rust-toolchain.toml
 ```

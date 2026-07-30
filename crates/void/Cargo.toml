@@ -15,7 +15,25 @@ gpui.workspace = true
 gpui_platform = { workspace = true, features = ["font-kit", "wayland", "x11"] }
 petname.workspace = true
 rust-embed.workspace = true
+semver.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+smol.workspace = true
 settings.workspace = true
+tempfile.workspace = true
 theme.workspace = true
+util.workspace = true
 workspace = { path = "../workspace" }
 void_terminal = { path = "../void_terminal" }
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+
+[package.metadata.bundle]
+name = "Void"
+identifier = "com.void.desktop"
+category = "Developer Tool"
+short_description = "An AI-first coding workspace for parallel coding agents."
+copyright = "Copyright © 2026 Usama Asfar"
+osx_minimum_system_version = "12.0"

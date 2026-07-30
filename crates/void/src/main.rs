@@ -8,6 +8,7 @@ mod icons;
 mod sidebar;
 mod text_input;
 mod theme;
+mod updater;
 
 fn main() {
     application::run();

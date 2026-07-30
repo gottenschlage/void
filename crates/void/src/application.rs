@@ -21,6 +21,7 @@ use crate::{
         TextInput,
     },
     theme,
+    updater::Updater,
 };
 
 const INITIAL_WINDOW_WIDTH: f32 = 1_300.0;
@@ -171,6 +172,7 @@ struct VoidRoot {
     branch_panels: HashMap<BranchId, Entity<BranchTerminalPanel>>,
     active_branch_id: Option<BranchId>,
     name_input: Entity<TextInput>,
+    updater: Entity<Updater>,
     error: Option<String>,
     is_creating: bool,
 }
@@ -185,6 +187,8 @@ impl VoidRoot {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let updater = cx.new(|cx| Updater::new(cx.app_path(), cx));
+        updater.update(cx, |updater, cx| updater.start(cx));
         let mut this = Self {
             workspace,
             sidebar: None,
@@ -200,6 +204,7 @@ impl VoidRoot {
             branch_panels: HashMap::new(),
             active_branch_id: None,
             name_input,
+            updater,
             error: None,
             is_creating: false,
         };
@@ -532,5 +537,6 @@ impl Render for VoidRoot {
                     .with_priority(2),
                 )
             })
+            .child(self.updater.clone())
     }
 }

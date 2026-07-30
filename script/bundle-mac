@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+target_triple="aarch64-apple-darwin"
+app_path="target/${target_triple}/release/bundle/osx/Void.app"
+artifact_dir="target/release-artifacts"
+dmg_path="${artifact_dir}/Void-aarch64.dmg"
+
+: "${APPLE_SIGNING_IDENTITY:?APPLE_SIGNING_IDENTITY is required}"
+: "${VOID_UPDATE_SIGNING_TEAM_ID:?VOID_UPDATE_SIGNING_TEAM_ID is required}"
+: "${APPLE_API_KEY:?APPLE_API_KEY is required}"
+: "${APPLE_API_KEY_ID:?APPLE_API_KEY_ID is required}"
+: "${APPLE_API_ISSUER_ID:?APPLE_API_ISSUER_ID is required}"
+
+cargo bundle --release --package void --target "${target_triple}"
+test -d "${app_path}"
+
+/usr/bin/codesign \
+  --force \
+  --timestamp \
+  --options runtime \
+  --sign "${APPLE_SIGNING_IDENTITY}" \
+  "${app_path}/Contents/MacOS/void"
+/usr/bin/codesign \
+  --force \
+  --timestamp \
+  --options runtime \
+  --sign "${APPLE_SIGNING_IDENTITY}" \
+  "${app_path}"
+/usr/bin/codesign --verify --deep --strict --verbose=2 "${app_path}"
+
+mkdir -p "${artifact_dir}"
+dmg_root="$(mktemp -d "${TMPDIR:-/tmp}/void-dmg.XXXXXX")"
+notarization_key="$(mktemp)"
+cleanup() {
+  rm -f "${notarization_key}"
+  rm -rf "${dmg_root}"
+}
+trap cleanup EXIT
+
+mv "${app_path}" "${dmg_root}/Void.app"
+ln -s /Applications "${dmg_root}/Applications"
+
+hdiutil create \
+  -volname Void \
+  -srcfolder "${dmg_root}" \
+  -ov \
+  -format UDZO \
+  "${dmg_path}"
+
+/usr/bin/codesign \
+  --force \
+  --timestamp \
+  --sign "${APPLE_SIGNING_IDENTITY}" \
+  "${dmg_path}"
+/usr/bin/codesign --verify --strict --verbose=2 "${dmg_path}"
+
+printf '%s' "${APPLE_API_KEY}" > "${notarization_key}"
+xcrun notarytool submit \
+  --wait \
+  --key "${notarization_key}" \
+  --key-id "${APPLE_API_KEY_ID}" \
+  --issuer "${APPLE_API_ISSUER_ID}" \
+  "${dmg_path}"
+xcrun stapler staple "${dmg_path}"
+xcrun stapler validate "${dmg_path}"
+/usr/bin/codesign --verify --strict --verbose=2 "${dmg_path}"
+/usr/sbin/spctl --assess --type open --context context:primary-signature --verbose=2 "${dmg_path}"
+shasum -a 256 "${dmg_path}" > "${dmg_path}.sha256"

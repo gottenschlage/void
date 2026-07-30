@@ -150,6 +150,42 @@ The platform feature set mirrors Zed's desktop application dependency:
 
 See [`decisions/0001-pin-gpui-to-zed-revision.md`](decisions/0001-pin-gpui-to-zed-revision.md) for why Void currently uses Git dependencies instead of the published `gpui` crate alone.
 
+## Release and update lifecycle
+
+Void currently has one production identity and release channel:
+`com.void.desktop`, stable, on Apple-silicon macOS. The release workflow is
+the only publisher. A push of a `v*.*.*` tag starts validation, requires the tag
+version to equal the `void` Cargo package version, runs the complete repository
+check suite, and then packages the application with `cargo-bundle`. The
+resulting executable is signed before the outer app without outer `--deep`, and
+the nested bundle is then verified strictly. The signed DMG is submitted with
+`notarytool`; its accepted ticket is stapled and both `codesign` and Gatekeeper
+assessment must pass before the GitHub Release is published. Cargo and bundle
+metadata both target macOS 12.
+
+GitHub Releases stores the artifacts and exposes the small `update.json` feed
+through its latest-release redirect. A release build requires the compile-time
+`VOID_RELEASE_BUILD=1` marker, compiled Apple Team ID, arm64 macOS target, and a
+running `.app` path. `Updater` owns one cancellable GPUI task for polling,
+download, and installation. It rejects non-stable or non-newer SemVer, streams
+the DMG through GPUI's injected HTTP client, and hashes bytes while writing them
+to a `TempDir`.
+
+Before replacement, Void verifies the DMG signature and Gatekeeper assessment,
+mounts it read-only without browsing, requires exactly `Void.app`, verifies all
+nested signatures and Apple's generic anchor, and requires `com.void.desktop`,
+the compiled Team ID, the manifest version, and arm64-only code. Only then does
+it use Zed's `rsync --delete` replacement sequence. `MacOsUnmounter` awaits a
+forced detach on normal exits and schedules detach from `Drop` on cancellation;
+startup cleanup removes installer directories older than 24 hours.
+
+Feed access, downloads, disk-image operations, and file replacement never run
+on GPUI's foreground executor. Development builds, unsupported platforms,
+unsupported architectures, and unbundled binaries disable the updater. Update
+feed failures return to idle and retry hourly. Authentication or installation
+failures retain their reason and expose one retry interaction. See
+[`decisions/0003-tagged-macos-releases-and-updates.md`](decisions/0003-tagged-macos-releases-and-updates.md).
+
 ## Current invariants
 
 - GPUI, `gpui_platform`, `sqlez`, and `sqlez_macros` must resolve from one Zed revision.
@@ -158,6 +194,8 @@ See [`decisions/0001-pin-gpui-to-zed-revision.md`](decisions/0001-pin-gpui-to-ze
 - Deleting database records never implies deleting Git branches or filesystem worktrees.
 - GPUI application and UI state are created and accessed through GPUI contexts.
 - Expensive I/O and process work must never be introduced into the render path or block GPUI's foreground executor.
+- Only a pushed `v*.*.*` tag whose version matches the Cargo package may publish a release.
+- The updater accepts only an authenticated stable manifest and a DMG matching its checksum, Apple Team ID, bundle identity, version, and architecture.
 - The binary remains a composition root; substantial product capabilities belong in focused crates once their boundaries are understood.
 - Architecture documentation and decision records must change together with the implementation.
 
@@ -181,6 +219,9 @@ Verified against local Zed commit `5e549b871fb87d1038d9b1b242bf7d4d4e3b4d8f`:
 - `crates/terminal_view/src/terminal_element.rs::TerminalElement` — grid coordinates, ANSI color resolution, cursor, and selection painting.
 - `crates/terminal_view/src/terminal_view.rs::TerminalView` — focus, keyboard, clipboard, scrolling, and dropped-path interaction.
 - `crates/terminal_view/src/terminal_panel.rs::TerminalPanel` — panel-local terminal entity ownership and activation.
+- `crates/auto_update/src/auto_update.rs::{AutoUpdater, install_release_macos, MacOsUnmounter}` — polling ownership, background installation, DMG lifecycle, bundle replacement, and restart state.
+- `crates/release_channel/src/lib.rs::app_identifier` and `crates/zed/Cargo.toml` bundle metadata — channel-specific macOS application identities.
+- `.github/workflows/release.yml` and `script/bundle-mac` — tag trigger, bundle construction, signing, DMG creation, notarization, and release assets.
 - `crates/gpui/src/app.rs::App::prompt_for_paths` — native asynchronous path selection.
 - `crates/gpui_platform/src/gpui_platform.rs::application` — native platform construction.
 - `crates/gpui/src/app.rs::App::open_window` — window and root-view creation.

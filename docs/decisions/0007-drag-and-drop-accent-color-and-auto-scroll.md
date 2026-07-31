@@ -1,5 +1,9 @@
 # ADR 0007: Fix the drag-and-drop accent color and add auto-scroll near edges
 
+> The custom accent-color portion of this decision was superseded by
+> [ADR 0017](0017-bundle-vercel-appearance-and-shared-scale.md). Edge
+> auto-scroll remains active.
+
 - **Status:** Accepted
 - **Date:** 2026-07-31
 - **Decision owners:** Void maintainers

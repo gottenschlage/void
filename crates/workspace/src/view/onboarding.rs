@@ -1,5 +1,6 @@
-use gpui::{Context, MouseButton, MouseUpEvent, Role, Window, actions, div, prelude::*, px};
+use gpui::{Context, MouseButton, MouseUpEvent, Role, Window, actions, div, prelude::*};
 use theme::ActiveTheme as _;
+use ui::scaled;
 
 use super::{branches::BranchHeader, sidebar::Sidebar, workspace::WorkspaceView};
 use crate::{Workspace, WorkspaceDb, WorkspaceModel};
@@ -64,7 +65,7 @@ impl WorkspaceView {
             .on_action(cx.listener(Self::submit))
             .flex()
             .flex_col()
-            .w(px(400.))
+            .w(scaled(400.))
             .gap_4()
             .p_6()
             .rounded_lg()
@@ -102,7 +103,7 @@ impl WorkspaceView {
                     .role(Role::Button)
                     .aria_label("Create workspace")
                     .flex()
-                    .h(px(32.))
+                    .h(scaled(32.))
                     .items_center()
                     .justify_center()
                     .rounded_sm()

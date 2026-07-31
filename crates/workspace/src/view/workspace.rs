@@ -4,10 +4,10 @@ use std::collections::HashMap;
 
 use gpui::{
     Animation, AnimationExt, Context, Entity, Focusable, Subscription, Task, Window, deferred, div,
-    prelude::*, px, rgb,
+    prelude::*, rgb,
 };
 use theme::ActiveTheme as _;
-use ui::TextInput;
+use ui::{TextInput, scaled};
 use void_terminal::{BranchTerminalPanel, TerminalSettings};
 
 use super::{
@@ -26,8 +26,6 @@ use crate::{Branch, BranchId, RepositoryId, WorkspaceModel};
 
 /// Font used for workspace chrome.
 pub(crate) const UI_FONT: &str = "JetBrains Mono";
-/// Font size used for workspace chrome and the window rem size.
-pub const UI_FONT_SIZE: f32 = 13.0;
 
 /// Coordinates the persisted workspace model and its GPUI-owned resources.
 pub struct WorkspaceView {
@@ -590,7 +588,7 @@ impl Render for WorkspaceView {
             .bg(cx.theme().colors().editor_background)
             .text_color(cx.theme().colors().text)
             .font_family(UI_FONT)
-            .text_size(px(UI_FONT_SIZE))
+            .text_sm()
             .child(self.render_titlebar(cx))
             .child(
                 div()
@@ -610,7 +608,7 @@ impl Render for WorkspaceView {
                                     ("sidebar-body-width", generation),
                                     Animation::new(TITLEBAR_TRANSITION),
                                     move |element, delta| {
-                                        element.w(px(interpolate_width(
+                                        element.w(scaled(interpolate_width(
                                             sidebar_start_width,
                                             sidebar_end_width,
                                             delta,

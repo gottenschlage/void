@@ -6,7 +6,7 @@ use gpui::{
     AccessibleAction, App, Bounds, ClipboardItem, Context, CursorStyle, EntityInputHandler,
     FocusHandle, Focusable, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels,
     Point, Role, SharedString, UTF16Selection, Window, accesskit::ActionData, actions, div,
-    prelude::*, px,
+    prelude::*,
 };
 use unicode_segmentation::UnicodeSegmentation as _;
 
@@ -462,7 +462,7 @@ impl Render for TextInput {
             .flex()
             .items_center()
             .w_full()
-            .h(px(32.))
+            .h(crate::scaled(32.))
             .px_2()
             .rounded_sm()
             .bg(cx.theme().colors().element_background)

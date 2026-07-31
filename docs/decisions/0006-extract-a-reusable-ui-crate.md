@@ -105,4 +105,4 @@ of repeating the chrome inline.
 
 ## Implementation update
 
-ADR 0011 later moved the product screens from the binary into `workspace`, preserving this decision's dependency direction. ADR 0014 split the low-level text-input element from its entity/input state and added `unicode-segmentation` for correct extended-grapheme movement. `ui` therefore still depends only on domain-independent rendering and Unicode support: `gpui`, `theme`, and `unicode-segmentation`.
+ADR 0011 later moved the product screens from the binary into `workspace`, preserving this decision's dependency direction. ADR 0014 split the low-level text-input element from its entity/input state and added `unicode-segmentation` for correct extended-grapheme movement. ADR 0017 restored semantic Zed theme tokens for the bundled Vercel variants and added proportional sizing; `ui` therefore remains domain-independent and depends only on `gpui`, `theme`, and `unicode-segmentation`.

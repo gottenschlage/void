@@ -8,7 +8,7 @@ impl Sidebar {
                 .position(point(px(8.0), px(HEADER_HEIGHT + 60.0)))
                 .child(
                     popover(cx)
-                        .w(px(224.))
+                        .w(scaled(224.))
                         .p_1()
                         .on_mouse_down_out(cx.listener(Self::dismiss_menu))
                         .children(
@@ -69,7 +69,7 @@ impl Sidebar {
                                                     repository_id.as_i64() as u64,
                                                 ))
                                                 .flex()
-                                                .size(px(24.))
+                                                .size(scaled(24.))
                                                 .items_center()
                                                 .justify_center()
                                                 .rounded_sm()
@@ -107,7 +107,7 @@ impl Sidebar {
                                                     repository_id.as_i64() as u64,
                                                 ))
                                                 .flex()
-                                                .size(px(24.))
+                                                .size(scaled(24.))
                                                 .items_center()
                                                 .justify_center()
                                                 .rounded_sm()
@@ -181,7 +181,7 @@ impl Sidebar {
                                                             repository_id.as_i64() as u64,
                                                         ))
                                                         .flex()
-                                                        .size(px(24.))
+                                                        .size(scaled(24.))
                                                         .items_center()
                                                         .justify_center()
                                                         .rounded_sm()

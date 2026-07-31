@@ -7,7 +7,7 @@ use gpui::{
 };
 use theme::ActiveTheme;
 
-use ui::{auto_scroll_toward_edge, icon_sized};
+use ui::{auto_scroll_toward_edge, icon_sized, scaled};
 
 pub(crate) const HEADER_HEIGHT: f32 = 37.5;
 const TAB_WIDTH: f32 = 165.0;
@@ -133,7 +133,7 @@ impl Render for BranchHeader {
         div()
             .id("branch-headers")
             .flex()
-            .h(px(HEADER_HEIGHT))
+            .h(scaled(HEADER_HEIGHT))
             .flex_none()
             .overflow_x_scroll()
             .track_scroll(&self.tabs_scroll)
@@ -154,7 +154,7 @@ impl Render for BranchHeader {
                     .relative()
                     .flex()
                     .flex_none()
-                    .w(px(TAB_WIDTH))
+                    .w(scaled(TAB_WIDTH))
                     .h_full()
                     .items_center()
                     .px_3()
@@ -210,7 +210,7 @@ impl Render for BranchHeader {
                             .id(("close-branch", branch_id.as_i64() as u64))
                             .absolute()
                             .right_1()
-                            .size(px(20.))
+                            .size(scaled(20.))
                             .flex()
                             .items_center()
                             .justify_center()
@@ -247,8 +247,8 @@ impl Render for DraggedBranch {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .flex()
-            .w(px(TAB_WIDTH))
-            .h(px(HEADER_HEIGHT))
+            .w(scaled(TAB_WIDTH))
+            .h(scaled(HEADER_HEIGHT))
             .items_center()
             .px_3()
             .bg(cx.theme().colors().surface_background)

@@ -5,13 +5,21 @@ use std::{collections::HashMap, path::PathBuf, time::Duration};
 use gpui::{
     App, Context, Entity, ExternalPaths, FocusHandle, Focusable, KeyDownEvent,
     ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Render,
-    ScrollWheelEvent, Subscription, Task, Window, div, prelude::*, px, rgb,
+    ScrollWheelEvent, Subscription, Task, Window, div, prelude::*, px,
 };
 use task::Shell;
 use terminal::{Event as TerminalEvent, Terminal, TerminalBuilder};
+use theme::ActiveTheme as _;
 use util::paths::PathStyle;
 
-use crate::{Copy, Paste, TerminalId, TerminalSettings, terminal_element::terminal_element};
+use crate::{
+    Copy, DecreaseTerminalFontSize, IncreaseTerminalFontSize, Paste, ResetTerminalFontSize,
+    TerminalId, TerminalSettings,
+    settings::{
+        decrease_terminal_font_size, increase_terminal_font_size, reset_terminal_font_size,
+    },
+    terminal_element::terminal_element,
+};
 
 pub(super) enum SessionState {
     Loading,
@@ -224,6 +232,33 @@ impl TerminalSession {
         }
     }
 
+    fn increase_font_size(
+        &mut self,
+        _: &IncreaseTerminalFontSize,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        increase_terminal_font_size(cx);
+    }
+
+    fn decrease_font_size(
+        &mut self,
+        _: &DecreaseTerminalFontSize,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        decrease_terminal_font_size(cx);
+    }
+
+    fn reset_font_size(
+        &mut self,
+        _: &ResetTerminalFontSize,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        reset_terminal_font_size(cx);
+    }
+
     fn paste_paths(&mut self, paths: &ExternalPaths, window: &mut Window, cx: &mut Context<Self>) {
         let text = paths
             .paths()
@@ -293,7 +328,7 @@ impl Render for TerminalSession {
         let body = match &self.state {
             SessionState::Loading => div().child("Starting shell…").into_any_element(),
             SessionState::Failed(error) => div()
-                .text_color(rgb(0xf14c4c))
+                .text_color(cx.theme().status().error)
                 .child(error.clone())
                 .child(" Close this terminal tab and open a new one to retry.")
                 .into_any_element(),
@@ -315,6 +350,9 @@ impl Render for TerminalSession {
             .key_context("Terminal")
             .on_action(cx.listener(Self::copy))
             .on_action(cx.listener(Self::paste))
+            .on_action(cx.listener(Self::increase_font_size))
+            .on_action(cx.listener(Self::decrease_font_size))
+            .on_action(cx.listener(Self::reset_font_size))
             .on_key_down(cx.listener(Self::key_down))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
             .on_mouse_move(cx.listener(Self::mouse_move))

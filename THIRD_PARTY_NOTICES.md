@@ -29,8 +29,11 @@ All entries below use the Zed revision recorded above.
 
 - The workspace dependencies `gpui` and `gpui_platform` come from
   `crates/gpui` and `crates/gpui_platform`.
-- The workspace dependencies `settings`, `task`, `terminal`, `theme`, `util`,
+- The workspace dependencies `settings`, `task`, `terminal`, `theme`, `theme_settings`, `util`,
   `sqlez`, and `sqlez_macros` come from the correspondingly named Zed crates.
+- `crates/void/assets/themes/vercel-theme.json` is adapted from Nathan Brodin's
+  `zed-vercel-theme/themes/vercel-theme.json` and is distributed under the MIT
+  license preserved beside it as `LICENSE-vercel-theme`.
 - `crates/void_terminal/src/lib.rs` and
   `crates/void_terminal/src/terminal_element.rs` adapt Zed's terminal
   ownership, input, rendering, and process-lifecycle patterns from

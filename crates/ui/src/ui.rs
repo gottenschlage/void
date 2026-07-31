@@ -23,6 +23,7 @@ mod popover;
 pub mod prelude;
 mod reorder;
 mod row;
+mod scale;
 mod text_input;
 
 pub use auto_scroll::*;
@@ -31,4 +32,5 @@ pub use icon::*;
 pub use popover::*;
 pub use reorder::*;
 pub use row::*;
+pub use scale::*;
 pub use text_input::*;

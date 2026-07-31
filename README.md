@@ -25,6 +25,11 @@ cargo run -p void
 
 A successful run opens a centered `1300 × 850` Void workspace window.
 
+Void bundles Vercel Light and Vercel Dark and follows the operating-system
+appearance. Outside a terminal, `Cmd/Ctrl` + `+`, `-`, and `0` adjust or reset
+the transient UI scale. With a terminal focused, the same shortcuts adjust or
+reset terminal text independently.
+
 ## Install
 
 Published releases currently support Apple-silicon Macs. Download

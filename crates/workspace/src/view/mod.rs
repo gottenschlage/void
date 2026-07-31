@@ -9,7 +9,7 @@ mod workspace;
 use gpui::{App, KeyBinding};
 use ui::{Backspace, Copy, Cut, Delete, Left, Paste, Right, SelectAll, SelectLeft, SelectRight};
 
-pub use workspace::{UI_FONT_SIZE, WorkspaceView};
+pub use workspace::WorkspaceView;
 
 /// Registers key bindings owned by workspace views and dialogs.
 pub fn init(cx: &mut App) {

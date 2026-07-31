@@ -15,7 +15,7 @@ use crate::{
     git::RepositoryLiveDiff,
     view::branches::{BranchSelected, HEADER_HEIGHT},
 };
-use ui::{ListRow, auto_scroll_toward_edge, icon, move_item, popover};
+use ui::{ListRow, auto_scroll_toward_edge, icon, move_item, popover, scaled};
 
 mod menu;
 mod repository;
@@ -566,7 +566,7 @@ impl gpui::Render for Sidebar {
             .flex()
             .flex_none()
             .flex_col()
-            .w(px(240.))
+            .w(scaled(240.))
             .h_full()
             .bg(cx.theme().colors().surface_background)
             .border_r_1()
@@ -583,7 +583,7 @@ impl gpui::Render for Sidebar {
                         .role(Role::Button)
                         .aria_label("Workspace menu")
                         .flex()
-                        .h(px(48.))
+                        .h(scaled(48.))
                         .items_center()
                         .justify_between()
                         .px_2()
@@ -604,7 +604,7 @@ impl gpui::Render for Sidebar {
                                 .child(
                                     div()
                                         .flex()
-                                        .size(px(32.))
+                                        .size(scaled(32.))
                                         .items_center()
                                         .justify_center()
                                         .rounded_sm()
@@ -647,7 +647,7 @@ impl gpui::Render for Sidebar {
                     .child(
                         div()
                             .flex()
-                            .h(px(28.))
+                            .h(scaled(28.))
                             .items_center()
                             .px_2()
                             .text_sm()

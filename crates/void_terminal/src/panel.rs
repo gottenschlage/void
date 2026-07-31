@@ -4,8 +4,9 @@ use std::{collections::HashMap, path::PathBuf};
 
 use gpui::{
     App, Context, DragMoveEvent, Entity, EventEmitter, Focusable, MouseButton, Render,
-    ScrollHandle, Subscription, Window, div, prelude::*, px, rgb,
+    ScrollHandle, Subscription, Window, div, prelude::*, px,
 };
+use theme::ActiveTheme as _;
 use ui::auto_scroll_toward_edge;
 
 use crate::{TerminalId, TerminalSession, TerminalSettings, TerminalTabs};
@@ -21,11 +22,12 @@ struct DraggedTerminal {
 }
 
 impl Render for DraggedTerminal {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .px_3()
             .py_1()
-            .bg(rgb(0x252526))
+            .bg(cx.theme().colors().elevated_surface_background)
+            .text_color(cx.theme().colors().text)
             .child(self.label.clone())
     }
 }
@@ -155,8 +157,9 @@ impl Render for BranchTerminalPanel {
                     .overflow_x_scroll()
                     .track_scroll(&self.tabs_scroll)
                     .on_drag_move::<DraggedTerminal>(cx.listener(Self::scroll_toward_drag))
+                    .bg(cx.theme().colors().tab_bar_background)
                     .border_b_1()
-                    .border_color(rgb(0x2b2b2b))
+                    .border_color(cx.theme().colors().border_variant)
                     .child(
                         div()
                             .id("new-terminal")
@@ -189,8 +192,17 @@ impl Render for BranchTerminalPanel {
                             .px_3()
                             .gap_2()
                             .border_r_1()
-                            .border_color(rgb(0x2b2b2b))
-                            .when(is_active, |tab| tab.bg(rgb(0x252526)))
+                            .border_color(cx.theme().colors().border_variant)
+                            .text_color(if is_active {
+                                cx.theme().colors().text
+                            } else {
+                                cx.theme().colors().text_muted
+                            })
+                            .bg(if is_active {
+                                cx.theme().colors().tab_active_background
+                            } else {
+                                cx.theme().colors().tab_inactive_background
+                            })
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(move |this, _, window, cx| {
@@ -204,8 +216,10 @@ impl Render for BranchTerminalPanel {
                                 },
                                 |dragged, _, _, cx| cx.new(|_| dragged.clone()),
                             )
-                            .drag_over::<DraggedTerminal>(|style, _, _, _| {
-                                style.border_l_2().border_color(rgb(0x3794ff))
+                            .drag_over::<DraggedTerminal>(|style, _, _, cx| {
+                                style
+                                    .border_l_2()
+                                    .border_color(cx.theme().colors().border_focused)
                             })
                             .on_drop(cx.listener(move |this, dragged: &DraggedTerminal, _, cx| {
                                 this.reorder(dragged.id, index, cx);
@@ -224,7 +238,7 @@ impl Render for BranchTerminalPanel {
                                     .opacity(0.)
                                     .group_hover("terminal-tab", |button| button.opacity(1.))
                                     .cursor_pointer()
-                                    .hover(|button| button.bg(rgb(0x3a3a3a)))
+                                    .hover(|button| button.bg(cx.theme().colors().element_hover))
                                     .on_mouse_down(
                                         MouseButton::Left,
                                         cx.listener(move |this, _, window, cx| {

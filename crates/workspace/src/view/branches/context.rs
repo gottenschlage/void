@@ -1,5 +1,6 @@
-use gpui::{Context, Entity, Render, Subscription, Window, div, prelude::*, px};
+use gpui::{Context, Entity, Render, Subscription, Window, div, prelude::*};
 use theme::ActiveTheme;
+use ui::scaled;
 
 use crate::{Branch, git::RepositoryLiveDiff};
 
@@ -32,7 +33,7 @@ impl Render for BranchContextHeader {
         div()
             .flex()
             .flex_none()
-            .h(px(HEADER_HEIGHT))
+            .h(scaled(HEADER_HEIGHT))
             .w_full()
             .items_center()
             .justify_between()

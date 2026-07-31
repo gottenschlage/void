@@ -25,9 +25,9 @@ settings = { git = "https://github.com/zed-industries/zed", rev = "5e549b871fb87
 task = { git = "https://github.com/zed-industries/zed", rev = "5e549b871fb87d1038d9b1b242bf7d4d4e3b4d8f" }
 terminal = { git = "https://github.com/zed-industries/zed", rev = "5e549b871fb87d1038d9b1b242bf7d4d4e3b4d8f" }
 theme = { git = "https://github.com/zed-industries/zed", rev = "5e549b871fb87d1038d9b1b242bf7d4d4e3b4d8f" }
+theme_settings = { git = "https://github.com/zed-industries/zed", rev = "5e549b871fb87d1038d9b1b242bf7d4d4e3b4d8f" }
 util = { git = "https://github.com/zed-industries/zed", rev = "5e549b871fb87d1038d9b1b242bf7d4d4e3b4d8f" }
 petname = { version = "3.1.0", default-features = false, features = ["default-rng", "default-words"] }
-refineable = { git = "https://github.com/zed-industries/zed", rev = "5e549b871fb87d1038d9b1b242bf7d4d4e3b4d8f" }
 rust-embed = "8.12"
 semver = "1.0"
 serde = { version = "1.0", features = ["derive"] }
@@ -51,3 +51,21 @@ unsafe_code = "deny"
 dbg_macro = "deny"
 todo = "deny"
 redundant_clone = "deny"
+
+[profile.dev]
+split-debuginfo = "unpacked"
+incremental = true
+codegen-units = 16
+debug = "limited"
+
+[profile.dev.package]
+gpui_macros = { opt-level = 3 }
+sqlez_macros = { opt-level = 3, codegen-units = 1 }
+tree-sitter = { opt-level = 3 }
+taffy = { opt-level = 3 }
+serde_json = { opt-level = 3 }
+
+[profile.release]
+debug = "limited"
+lto = "thin"
+codegen-units = 1

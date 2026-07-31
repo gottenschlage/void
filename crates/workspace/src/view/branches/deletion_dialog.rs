@@ -5,11 +5,11 @@ use crate::{
 };
 use gpui::{
     Context, EventEmitter, Focusable, MouseButton, MouseUpEvent, PromptLevel, Role, Subscription,
-    Task, Window, actions, div, prelude::*, px,
+    Task, Window, actions, div, prelude::*,
 };
 use theme::ActiveTheme;
 
-use ui::{TextInput, dialog};
+use ui::{TextInput, dialog, scaled};
 
 actions!(branch_deletion_dialog, [ConfirmDeletion, CancelDeletion]);
 
@@ -433,7 +433,7 @@ impl gpui::Render for BranchDeletionDialog {
             .on_action(cx.listener(Self::cancel))
             .flex()
             .flex_col()
-            .w(px(440.))
+            .w(scaled(440.))
             .gap_4()
             .p_5()
             .text_color(cx.theme().colors().text)
@@ -472,7 +472,7 @@ impl gpui::Render for BranchDeletionDialog {
                             .tab_stop(true)
                             .role(Role::Button)
                             .aria_label("Cancel branch deletion")
-                            .h(px(32.))
+                            .h(scaled(32.))
                             .px_3()
                             .flex()
                             .items_center()
@@ -494,7 +494,7 @@ impl gpui::Render for BranchDeletionDialog {
                             .tab_stop(true)
                             .role(Role::Button)
                             .aria_label("Permanently delete branch")
-                            .h(px(32.))
+                            .h(scaled(32.))
                             .px_3()
                             .flex()
                             .items_center()

@@ -10,7 +10,7 @@ Void follows Zed's Cargo-workspace organization without pre-creating speculative
 
 - The root `Cargo.toml` owns workspace membership, dependency revisions, package defaults, and shared lints.
 - `crates/void` is the thin native binary and composition root. It owns startup, application assets, palette initialization, and updater composition.
-- `crates/ui` holds reusable, domain-agnostic UI primitives — building blocks that depend only on `gpui`, `theme`, and Unicode segmentation, with no knowledge of Void's product types. See [ADR 0006](decisions/0006-extract-a-reusable-ui-crate.md).
+- `crates/ui` holds reusable, domain-agnostic UI primitives — building blocks that depend only on `gpui`, `theme`, and Unicode segmentation, with no knowledge of Void's product types. It also owns the root UI scale, proportional component-size steps, and scale-relative measurement helper. See [ADR 0006](decisions/0006-extract-a-reusable-ui-crate.md).
 - `crates/void_update` owns the authenticated stable-channel updater, including status/task lifecycle, feed validation, streaming download and hashing, macOS installation verification, cancellation cleanup, and status rendering.
 - `crates/workspace` owns application-data paths, SQLite persistence, Git/worktree behavior, and the workspace product surface under `src/view/`. The view coordinator owns terminal panels and other GPUI resources keyed by branch identity.
 - Future domain or UI crates should be introduced only when a requested feature has a clear responsibility and a corresponding Zed architecture to reference.
@@ -30,17 +30,17 @@ The current native startup flow is:
 7. With no workspace, `WorkspaceView` renders a focused name input and persists the submitted workspace asynchronously.
 8. With a workspace, `WorkspaceView` renders an integrated native title-bar row above the repository sidebar and branch content and owns GPUI resources keyed by stable branch IDs.
 9. Void activates the application after window creation.
-10. If database loading, required base-theme lookup, or initial-window creation fails, Void reports the error and stops rather than panicking.
+10. If database loading or initial-window creation fails, Void reports the error and stops rather than panicking.
 
 `void_terminal` owns shell processes used by workspace branch panels. No coding-agent implementation exists yet.
 
 ## Theming
 
-`::theme::init` (the pinned GPUI revision's `theme` crate) runs first and installs Zed's bundled "One Dark" theme as the active `theme::GlobalTheme`. `crate::theme::init` (`crates/void/src/theme.rs`) then replaces it with Void's palette: it fetches that same bundled theme from `theme::ThemeRegistry` and calls `ThemeColors::refined` with a `ThemeColorsRefinement` that overrides only the surface, border, element, and text tokens Void's UI renders, leaving syntax/status/vim/diff/terminal-ANSI colors as Zed's verified defaults.
+Void bundles Nathan Brodin's MIT-licensed Zed Vercel theme JSON and parses it through the pinned `theme_settings` schema/refinement path. Startup validates and registers exactly `Vercel Light` and `Vercel Dark`, selects from the native system appearance, and installs the resolved value as Zed's `theme::GlobalTheme`. `AppView` owns the window-appearance subscription, updates `theme::SystemAppearance`, switches variants, and refreshes windows. No theme picker, external theme loading, per-token overrides, icon themes, or user-settings observer is installed.
 
-Render code reads colors through `theme::ActiveTheme` (`cx.theme().colors().<field>`, `cx.theme().status().<field>`), never through hardcoded constants. `UI_FONT` and `UI_FONT_SIZE` are plain constants beside `WorkspaceView`, since fonts are workspace chrome but are not part of `theme::Theme` in the pinned revision — Zed itself sources fonts from the separate `theme_settings` crate, which Void does not depend on (see [ADR 0005](decisions/0005-adopt-zeds-theme-token-system.md) for why). Buffer/terminal font sizing is still owned independently by `void_terminal::TerminalSettings`.
+Render code reads semantic colors through `theme::ActiveTheme`. Existing terminal sessions also derive foreground, selection, cursor, background, and ANSI colors from the active theme during layout, so a system appearance change cannot leave stale terminal colors. Fields left `null` by the upstream JSON are completed by Zed's light/dark refinement defaults; the JSON is authoritative only for its explicit values. See [ADR 0017](decisions/0017-bundle-vercel-appearance-and-shared-scale.md).
 
-`text_accent` (`rgb(0x3794ff)`) is the one shared accent color for both primary-button backgrounds and drag-and-drop indicators; scrollable containers that accept a drag (`workspace/src/view/sidebar`'s repository list, `view/branches/tabs.rs`, and `void_terminal`'s tab bar) also auto-scroll toward the cursor's edge mid-drag via `ui::auto_scroll_toward_edge`, so a drop target scrolled out of view can still be reached. See [ADR 0007](decisions/0007-drag-and-drop-accent-color-and-auto-scroll.md).
+Scrollable drop targets continue to auto-scroll toward the cursor's edge through `ui::auto_scroll_toward_edge`. See [ADR 0007](decisions/0007-drag-and-drop-accent-color-and-auto-scroll.md).
 
 ## First-launch UI
 
@@ -83,7 +83,7 @@ Non-macOS window options retain GPUI defaults. See
 
 ## Main shell and repository onboarding
 
-The main shell is a compact fixed-width repository sidebar beside a branch-selection placeholder. Its layout, JetBrains Mono typography, neutral dark palette, spacing, and interaction hierarchy adapt Sunware's desktop sidebar exactly; its GPUI composition and lifecycle follow Zed. The window uses Sunware's 15 px root scale through `Window::set_rem_size`, so GPUI's rem-based text and spacing utilities resolve to the same density as the desktop CSS. Fixed shell measurements also follow the desktop source: a 240 px sidebar, 37.5 px branch strip, and 165 px branch tabs. Theme tokens remain centralized in `crates/void/src/theme.rs`. The workspace row opens a deferred anchored menu that lists active repositories, supports persistent pinning and non-destructive archiving, shows archived repositories in a separate muted section with a restore action, and ends with **Add repository**. Pinned repositories sort first. Repository rows in the menu and branch rows in the sidebar use typed GPUI drag payloads and detached previews; drops update the UI immediately and persist positions asynchronously within their owning workspace or repository. Repository writes run outside rendering, are held by the sidebar so release cancels them, and temporarily disable the affected menu row. Repository rows expand and collapse, switch between closed and open folder icons, and reveal an add-branch button on hover. Active managed branches appear beneath their expanded repository with their stable integration number; an expanded repository without active branch records displays **No branches yet**.
+The main shell is a compact repository sidebar beside a branch-selection placeholder. Its layout, JetBrains Mono typography, spacing, and interaction hierarchy adapt Sunware's desktop sidebar; its colors come from the active Vercel variant and its composition and lifecycle follow Zed. The default root UI scale is 14 px. Ordinary design measurements are stored as proportions of that baseline through `ui::scaled`, while named `ComponentSize::{Xs, Sm, Md, Lg, Xl}` steps provide reusable relative sizes. One-pixel separators, native window geometry, terminal grid painting, and pointer hit calculations remain pixel-based. The original baseline remains a 240 px-equivalent sidebar, 37.5 px-equivalent branch strip, and 165 px-equivalent branch tabs. The workspace row opens a deferred anchored menu that lists active repositories, supports persistent pinning and non-destructive archiving, shows archived repositories in a separate muted section with a restore action, and ends with **Add repository**. Pinned repositories sort first. Repository rows in the menu and branch rows in the sidebar use typed GPUI drag payloads and detached previews; drops update the UI immediately and persist positions asynchronously within their owning workspace or repository. Repository writes run outside rendering, are held by the sidebar so release cancels them, and temporarily disable the affected menu row. Repository rows expand and collapse, switch between closed and open folder icons, and reveal an add-branch button on hover. Active managed branches appear beneath their expanded repository with their stable integration number; an expanded repository without active branch records displays **No branches yet**.
 
 Adding a repository uses GPUI's native directory prompt. Validation and the system Git process run on the background executor. Void canonicalizes the selected path, requires it to be the root of a non-bare Git worktree, derives the repository name from the directory, rejects duplicate paths, then persists and displays the repository without restarting. The system Git executable remains authoritative for deciding whether the directory is a repository. Picker, validation, and database errors stay in the sidebar as plain inline feedback.
 
@@ -157,16 +157,15 @@ and 9 px vertical inset match Sunware's desktop terminal panel. Loading and
 spawn failures render inline in the terminal body.
 
 `TerminalSettings` is passed into each panel and is the caller-facing source of
-truth for terminal construction and painting. It defines the JetBrains Mono
-13 px font and line height, underline blinking cursor, transparent background,
-desktop ANSI/default/selection/cursor colors, alternate-scroll and Option-as-
-Meta behavior, and bounded scrollback. The terminal surface has no scrollbar.
-Settings persistence and UI remain deferred.
-
-Void initializes Zed's base theme model during application startup even though
-its visible workspace palette remains locally defined. The pinned terminal
-backend consults that global model when a program requests terminal colors, so
-the model must exist before any terminal session starts.
+truth for terminal construction and non-theme presentation. It defines the
+JetBrains Mono 13 px configured font, line-height ratio, underline blinking
+cursor, alternate-scroll and Option-as-Meta behavior, and bounded scrollback.
+The active Vercel theme supplies terminal colors at layout time. A transient
+global font-size adjustment is applied to the configured size and clamped from
+8 through 32 px; terminal-focused zoom actions update it and refresh windows,
+while reset removes the adjustment. Cell width, line height, PTY dimensions,
+cursor geometry, and painting are derived again from the adjusted size. The
+terminal surface has no scrollbar. Settings persistence and UI remain deferred.
 
 The terminal paint element derives its cell width from GPUI text shaping and
 uses the same snapped bounds for PTY resizing, painting, cursor placement,

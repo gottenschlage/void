@@ -5,11 +5,11 @@ use crate::{
 };
 use gpui::{
     Anchor, Context, EventEmitter, Focusable, MouseButton, MouseDownEvent, MouseUpEvent, Role,
-    Task, Window, actions, anchored, deferred, div, prelude::*, px,
+    Task, Window, actions, anchored, deferred, div, prelude::*,
 };
 use theme::ActiveTheme;
 
-use ui::{ListRow, TextInput, dialog, icon, popover};
+use ui::{ListRow, TextInput, dialog, icon, popover, scaled};
 
 actions!(branch_dialog, [ConfirmBranch, CancelBranch]);
 
@@ -245,7 +245,7 @@ impl BranchDialog {
                 popover(cx)
                     .id("base-branches")
                     .w_full()
-                    .max_h(px(220.))
+                    .max_h(scaled(220.))
                     .overflow_y_scroll()
                     .p_1()
                     .on_mouse_down_out(cx.listener(Self::dismiss_base_menu))
@@ -289,7 +289,7 @@ impl gpui::Render for BranchDialog {
             .on_action(cx.listener(Self::cancel))
             .flex()
             .flex_col()
-            .w(px(480.))
+            .w(scaled(480.))
             .gap_5()
             .p_5()
             .text_color(cx.theme().colors().text)
@@ -304,7 +304,7 @@ impl gpui::Render for BranchDialog {
                         div()
                             .id("close-branch-dialog")
                             .flex()
-                            .size(px(24.))
+                            .size(scaled(24.))
                             .items_center()
                             .justify_center()
                             .rounded_sm()
@@ -330,7 +330,7 @@ impl gpui::Render for BranchDialog {
                             .id("base-branch-menu")
                             .relative()
                             .flex()
-                            .h(px(32.))
+                            .h(scaled(32.))
                             .items_center()
                             .justify_between()
                             .px_2()
@@ -384,9 +384,9 @@ impl gpui::Render for BranchDialog {
                                 .id("regenerate-branch-name")
                                 .absolute()
                                 .right_1()
-                                .top(px(4.))
+                                .top(scaled(4.))
                                 .flex()
-                                .size(px(24.))
+                                .size(scaled(24.))
                                 .items_center()
                                 .justify_center()
                                 .rounded_sm()
@@ -418,7 +418,7 @@ impl gpui::Render for BranchDialog {
                             .role(Role::Button)
                             .aria_label("Cancel")
                             .flex()
-                            .h(px(32.))
+                            .h(scaled(32.))
                             .items_center()
                             .px_3()
                             .rounded_sm()
@@ -444,7 +444,7 @@ impl gpui::Render for BranchDialog {
                             .role(Role::Button)
                             .aria_label("Create branch")
                             .flex()
-                            .h(px(32.))
+                            .h(scaled(32.))
                             .items_center()
                             .px_3()
                             .rounded_sm()

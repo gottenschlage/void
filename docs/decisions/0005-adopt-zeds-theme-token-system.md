@@ -1,6 +1,6 @@
 # ADR 0005: Adopt Zed's `theme` token system instead of hardcoded colors
 
-- **Status:** Accepted
+- **Status:** Superseded by [ADR 0017](0017-bundle-vercel-appearance-and-shared-scale.md)
 - **Date:** 2026-07-31
 - **Decision owners:** Void maintainers
 

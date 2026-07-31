@@ -36,4 +36,4 @@ pub use persistence::{
     Branch, BranchId, NewBranch, NewRepository, Repository, RepositoryId, Workspace, WorkspaceDb,
     WorkspaceId,
 };
-pub use view::{UI_FONT_SIZE, WorkspaceView, init};
+pub use view::{WorkspaceView, init};

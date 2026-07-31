@@ -15,6 +15,7 @@ use terminal::{
 use crate::{
     TerminalSettings,
     session::{SessionState, TerminalSession},
+    settings::terminal_font_size,
 };
 
 struct PaintState {
@@ -61,7 +62,8 @@ pub(crate) fn terminal_element(
     let prepaint_session = session.clone();
     canvas(
         move |bounds, window, cx| {
-            let font_size = px(settings.font_size);
+            let settings = settings.themed(cx);
+            let font_size = px(terminal_font_size(settings.font_size, cx));
             let base_font = font(settings.font_family.clone());
             let measure = window.text_system().shape_line(
                 "m".into(),
@@ -75,7 +77,7 @@ pub(crate) fn terminal_element(
                 None,
             );
             let cell_width = measure.width().ceil().max(px(1.));
-            let line_height = px(settings.font_size * settings.line_height).max(px(1.));
+            let line_height = (font_size * settings.line_height).max(px(1.));
             let scale = window.scale_factor().max(1.);
             let snap = |value: Pixels| px((f32::from(value) * scale).floor() / scale);
             let terminal_bounds = TerminalBounds::new(

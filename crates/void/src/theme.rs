@@ -1,74 +1,78 @@
-//! Void's active theme: a refinement of Zed's bundled "One Dark" theme.
-//!
-//! `::theme::init` (called at startup in `application.rs`) loads Zed's real
-//! [`theme::Theme`]/[`theme::ThemeColors`] system and installs Zed's own
-//! default dark theme as the active [`theme::GlobalTheme`]. Void has no theme
-//! extension or `theme_settings` crate, so rather than authoring a full
-//! 150+ field `Theme` from scratch, [`init`] takes that verified default and
-//! refines only the tokens Void's UI renders — surfaces, borders, elements,
-//! and text — leaving syntax, status, vim, and diff colors as Zed's defaults
-//! until Void has a use for them.
-//!
-//! Call sites read colors through [`theme::ActiveTheme::theme`], e.g.
-//! `cx.theme().colors().border`, never through hardcoded constants.
+//! Bundled Vercel theme initialization and system-appearance synchronization.
 
-use std::sync::Arc;
+use anyhow::{Context as _, ensure};
+use gpui::{App, WindowAppearance};
+use theme::{Appearance, GlobalTheme, SystemAppearance, ThemeRegistry};
 
-use anyhow::Context as _;
-use gpui::{App, rgb};
-use refineable::Refineable as _;
-use theme::{
-    DEFAULT_DARK_THEME, GlobalTheme, Theme, ThemeColorsRefinement, ThemeRegistry, ThemeStyles,
-};
+const VERCEL_THEME: &[u8] = include_bytes!("../assets/themes/vercel-theme.json");
+const VERCEL_DARK: &str = "Vercel Dark";
+const VERCEL_LIGHT: &str = "Vercel Light";
 
-/// Installs Void's palette as the active theme.
-///
-/// Must run after `::theme::init`, which registers `DEFAULT_DARK_THEME` and
-/// makes it the active [`GlobalTheme`].
+/// Registers Void's two bundled themes and activates the system variant.
 pub(crate) fn init(cx: &mut App) -> anyhow::Result<()> {
-    let registry = ThemeRegistry::default_global(cx);
-    let base = registry
-        .get(DEFAULT_DARK_THEME)
-        .context("Zed's bundled default dark theme was not registered")?;
+    ::theme::init(::theme::LoadThemes::JustBase, cx);
 
-    let transparent = base.colors().border_transparent;
-    let colors = base.colors().clone().refined(ThemeColorsRefinement {
-        border: Some(rgb(0x2e2e2e).into()),
-        border_variant: Some(rgb(0x2e2e2e).into()),
-        border_focused: Some(transparent),
-        elevated_surface_background: Some(rgb(0x000000).into()),
-        surface_background: Some(rgb(0x000000).into()),
-        background: Some(rgb(0x0a0a0a).into()),
-        element_background: Some(rgb(0x1f1f1f).into()),
-        element_hover: Some(rgb(0x1a1a1a).into()),
-        element_active: Some(rgb(0x1f1f1f).into()),
-        text: Some(rgb(0xededed).into()),
-        text_muted: Some(rgb(0xa0a0a0).into()),
-        text_placeholder: Some(rgb(0x737373).into()),
-        text_accent: Some(rgb(0x3794ff).into()),
-        panel_background: Some(rgb(0x000000).into()),
-        title_bar_background: Some(rgb(0x000000).into()),
-        title_bar_inactive_background: Some(rgb(0x000000).into()),
-        tab_bar_background: Some(rgb(0x000000).into()),
-        tab_active_background: Some(rgb(0x000000).into()),
-        tab_inactive_background: Some(rgb(0x111111).into()),
-        editor_background: Some(rgb(0x0a0a0a).into()),
-        terminal_background: Some(rgb(0x0a0a0a).into()),
-        status_bar_background: Some(rgb(0x000000).into()),
-        toolbar_background: Some(rgb(0x000000).into()),
-        ..Default::default()
-    });
+    let content = theme_settings::deserialize_user_theme(VERCEL_THEME)
+        .context("parsing the bundled Vercel theme")?;
+    let family = theme_settings::refine_theme_family(content);
+    ensure!(
+        family.themes.len() == 2
+            && family.themes.iter().any(|theme| {
+                theme.name.as_ref() == VERCEL_LIGHT && theme.appearance == Appearance::Light
+            })
+            && family.themes.iter().any(|theme| {
+                theme.name.as_ref() == VERCEL_DARK && theme.appearance == Appearance::Dark
+            }),
+        "the bundled Vercel theme must contain exactly its light and dark variants"
+    );
 
-    let theme = Theme {
-        id: "void-dark".to_string(),
-        name: "Void Dark".into(),
-        appearance: base.appearance(),
-        styles: ThemeStyles {
-            colors,
-            ..base.styles.clone()
-        },
+    ThemeRegistry::default_global(cx).insert_theme_families([family]);
+    activate(SystemAppearance::global(cx).0, cx)
+}
+
+/// Follows a native appearance change.
+pub(crate) fn sync_system_appearance(
+    appearance: WindowAppearance,
+    cx: &mut App,
+) -> anyhow::Result<()> {
+    let appearance = Appearance::from(appearance);
+    *SystemAppearance::global_mut(cx) = SystemAppearance(appearance);
+    activate(appearance, cx)
+}
+
+fn activate(appearance: Appearance, cx: &mut App) -> anyhow::Result<()> {
+    let name = match appearance {
+        Appearance::Light => VERCEL_LIGHT,
+        Appearance::Dark => VERCEL_DARK,
     };
-
-    GlobalTheme::update_theme(cx, Arc::new(theme));
+    let theme = ThemeRegistry::global(cx)
+        .get(name)
+        .with_context(|| format!("loading bundled theme {name:?}"))?;
+    GlobalTheme::update_theme(cx, theme);
+    cx.refresh_windows();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Appearance, VERCEL_DARK, VERCEL_LIGHT, VERCEL_THEME};
+
+    #[test]
+    fn bundled_theme_contains_only_light_and_dark() {
+        let family = theme_settings::deserialize_user_theme(VERCEL_THEME)
+            .expect("the bundled theme should parse");
+        let themes = theme_settings::refine_theme_family(family)
+            .themes
+            .into_iter()
+            .map(|theme| (theme.name.to_string(), theme.appearance))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            themes,
+            [
+                (VERCEL_DARK.to_owned(), Appearance::Dark),
+                (VERCEL_LIGHT.to_owned(), Appearance::Light),
+            ]
+        );
+    }
 }

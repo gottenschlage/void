@@ -5,7 +5,7 @@ use gpui::{
     WindowControlArea, div, point, prelude::*, px,
 };
 use theme::ActiveTheme as _;
-use ui::icon_sized;
+use ui::{icon_sized, scaled};
 
 use super::{branches::HEADER_HEIGHT, workspace::WorkspaceView};
 
@@ -76,7 +76,7 @@ impl WorkspaceView {
             .id("void-titlebar")
             .window_control_area(WindowControlArea::Drag)
             .flex()
-            .h(px(HEADER_HEIGHT))
+            .h(scaled(HEADER_HEIGHT))
             .flex_none()
             .bg(cx.theme().colors().surface_background)
             .on_mouse_down(MouseButton::Left, cx.listener(Self::titlebar_mouse_down))
@@ -115,7 +115,7 @@ impl WorkspaceView {
                                 "Open sidebar"
                             })
                             .flex()
-                            .size(px(28.))
+                            .size(scaled(28.))
                             .items_center()
                             .justify_center()
                             .rounded_sm()
@@ -143,7 +143,7 @@ impl WorkspaceView {
                         ("sidebar-titlebar-width", generation),
                         Animation::new(TITLEBAR_TRANSITION),
                         move |element, delta| {
-                            element.w(px(interpolate_width(start_width, end_width, delta)))
+                            element.w(scaled(interpolate_width(start_width, end_width, delta)))
                         },
                     ),
             )

@@ -1,4 +1,6 @@
-use gpui::{InteractiveElement, Styled, px};
+use gpui::{InteractiveElement, Styled};
+
+use crate::scaled;
 
 /// The list-row shape shared by sidebar rows, menu items, and popover
 /// entries: fixed height, horizontal padding, rounded corners. Callers apply
@@ -8,7 +10,7 @@ use gpui::{InteractiveElement, Styled, px};
 pub trait ListRow: Styled + InteractiveElement + Sized {
     fn list_row(self, height: f32) -> Self {
         self.flex()
-            .h(px(height))
+            .h(scaled(height))
             .items_center()
             .px_2()
             .rounded_sm()

@@ -13,10 +13,11 @@ workspace = true
 anyhow.workspace = true
 gpui.workspace = true
 gpui_platform = { workspace = true, features = ["font-kit", "wayland", "x11"] }
-refineable.workspace = true
 rust-embed.workspace = true
 settings.workspace = true
 theme.workspace = true
+theme_settings.workspace = true
+ui = { path = "../ui" }
 workspace = { path = "../workspace" }
 void_terminal = { path = "../void_terminal" }
 void_update = { path = "../void_update" }

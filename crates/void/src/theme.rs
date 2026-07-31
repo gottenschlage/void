@@ -14,25 +14,22 @@
 
 use std::sync::Arc;
 
+use anyhow::Context as _;
 use gpui::{App, rgb};
 use refineable::Refineable as _;
 use theme::{
     DEFAULT_DARK_THEME, GlobalTheme, Theme, ThemeColorsRefinement, ThemeRegistry, ThemeStyles,
 };
 
-/// The font used for UI chrome: sidebar, tabs, titlebar, menus.
-pub(crate) const UI_FONT: &str = "JetBrains Mono";
-pub(crate) const UI_FONT_SIZE: f32 = 13.0;
-
 /// Installs Void's palette as the active theme.
 ///
 /// Must run after `::theme::init`, which registers `DEFAULT_DARK_THEME` and
 /// makes it the active [`GlobalTheme`].
-pub(crate) fn init(cx: &mut App) {
+pub(crate) fn init(cx: &mut App) -> anyhow::Result<()> {
     let registry = ThemeRegistry::default_global(cx);
     let base = registry
         .get(DEFAULT_DARK_THEME)
-        .expect("theme::init registers Zed's bundled default dark theme");
+        .context("Zed's bundled default dark theme was not registered")?;
 
     let transparent = base.colors().border_transparent;
     let colors = base.colors().clone().refined(ThemeColorsRefinement {
@@ -73,4 +70,5 @@ pub(crate) fn init(cx: &mut App) {
     };
 
     GlobalTheme::update_theme(cx, Arc::new(theme));
+    Ok(())
 }

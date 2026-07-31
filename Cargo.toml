@@ -1,6 +1,12 @@
 [workspace]
 resolver = "2"
-members = ["crates/ui", "crates/void", "crates/void_terminal", "crates/workspace"]
+members = [
+    "crates/ui",
+    "crates/void",
+    "crates/void_terminal",
+    "crates/void_update",
+    "crates/workspace",
+]
 default-members = ["crates/void"]
 
 [workspace.package]
@@ -31,13 +37,15 @@ smol = "2.0"
 sqlez = { git = "https://github.com/zed-industries/zed", rev = "5e549b871fb87d1038d9b1b242bf7d4d4e3b4d8f" }
 sqlez_macros = { git = "https://github.com/zed-industries/zed", rev = "5e549b871fb87d1038d9b1b242bf7d4d4e3b4d8f" }
 tempfile = "3.20"
+thiserror = "2.0"
+unicode-segmentation = "1.10"
 
 [patch.crates-io]
 async-process = { git = "https://github.com/zed-industries/async-process.git", rev = "0b6d6713570af61806e1e5cb40e0f757cb93fd9d" }
 async-task = { git = "https://github.com/smol-rs/async-task.git", rev = "b4486cd71e4e94fbda54ce6302444de14f4d190e" }
 
 [workspace.lints.rust]
-unexpected_cfgs = { level = "allow" }
+unsafe_code = "deny"
 
 [workspace.lints.clippy]
 dbg_macro = "deny"

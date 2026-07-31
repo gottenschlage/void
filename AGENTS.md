@@ -148,6 +148,10 @@ documentation means the work is incomplete.
 
 ## Required workflow for implementation tasks
 
+For work that spans several phases, commits, approval gates, or context windows,
+maintain `working-memory.md` according to
+[`docs/how-to/use-working-memory.md`](docs/how-to/use-working-memory.md).
+
 ### 1. Understand
 
 - Restate the request as concrete acceptance criteria.

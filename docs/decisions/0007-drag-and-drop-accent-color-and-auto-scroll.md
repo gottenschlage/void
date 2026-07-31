@@ -15,7 +15,7 @@ branch tab bar's reordering:
    the near-black backgrounds, the 2px drag-over border rendered as a stark
    white line, which read as harsh/unpolished next to the terminal tab bar's
    own drag indicator, which hardcodes a blue (`rgb(0x3794ff)`,
-   `crates/void_terminal/src/lib.rs`).
+   `crates/void_terminal/src/panel.rs`).
 2. Reordering an item to the very top/start of a list only works if the drop
    target is currently visible — none of the three scrollable drag surfaces
    (sidebar's repository list, the branch tab bar, the terminal tab bar)
@@ -45,8 +45,8 @@ whichever edge of the container the cursor is within 48px of, by a fixed
 its `max_offset` is zero, so the same function works for the sidebar's
 vertical list and both tab bars' horizontal lists without an axis parameter.
 
-Each of the three scrollable containers (`sidebar.rs`'s `repository-list`,
-`branch_header.rs`'s `branch-headers`, `void_terminal`'s `terminal-tabs`) now
+Each of the three scrollable containers (`workspace/src/view/sidebar`'s `repository-list`,
+`workspace/src/view/branches/tabs.rs`'s `branch-headers`, `void_terminal`'s `terminal-tabs`) now
 tracks a `ScrollHandle` field and calls this function from an
 `on_drag_move::<T>` handler registered per draggable payload type, calling
 `cx.notify()` afterward so the scrolled position repaints.
@@ -77,7 +77,7 @@ domain crate), consistent with ADR 0006.
 ## References
 
 - `crates/ui/src/auto_scroll.rs`, `crates/void/src/theme.rs`
-- `crates/void/src/sidebar.rs` (`repository_list_scroll`, `scroll_toward_drag`)
-- `crates/void/src/branch_header.rs` (`tabs_scroll`, `scroll_toward_drag`)
-- `crates/void_terminal/src/lib.rs` (`tabs_scroll`, `scroll_toward_drag`)
+- `crates/workspace/src/view/sidebar/mod.rs` (`repository_list_scroll`, `scroll_toward_drag`)
+- `crates/workspace/src/view/branches/tabs.rs` (`tabs_scroll`, `scroll_toward_drag`)
+- `crates/void_terminal/src/panel.rs` (`tabs_scroll`, `scroll_toward_drag`)
 - GPUI `ScrollHandle`/`DragMoveEvent`: `gpui/src/elements/div.rs`

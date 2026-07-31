@@ -12,7 +12,10 @@ use terminal::{
     Terminal, TerminalBounds,
 };
 
-use crate::{SessionState, TerminalSession, TerminalSettings};
+use crate::{
+    TerminalSettings,
+    session::{SessionState, TerminalSession},
+};
 
 struct PaintState {
     backgrounds: Vec<(Bounds<Pixels>, Hsla)>,
@@ -190,8 +193,7 @@ fn build_paint_state(
         let can_append = current.as_ref().is_some_and(|batch| {
             batch.row == row && batch.next_column == indexed.point.column && batch.style == style
         });
-        if can_append {
-            let batch = current.as_mut().expect("checked above");
+        if can_append && let Some(batch) = current.as_mut() {
             batch.text.push_str(&text);
             batch.next_column += 1;
         } else {

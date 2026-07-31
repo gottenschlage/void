@@ -63,8 +63,8 @@ has a concrete use for it. `application.rs::run` calls this `theme::init(cx)`
 right after `::theme::init(...)`, replacing the default `GlobalTheme` with
 Void's refined one via `GlobalTheme::update_theme`.
 
-Every render call site (`sidebar.rs`, `branch_header.rs`, `branch_dialog.rs`,
-`text_input.rs`, `updater.rs`, `icons.rs`, `application.rs`) now reads
+Every render call site (`workspace/src/view/sidebar`, `workspace/src/view/branches`,
+`ui/src/text_input/`, `void_update/src/status_view.rs`, `ui/src/icon.rs`, `void/src/application.rs`) now reads
 `cx.theme().colors().<field>` / `cx.theme().status().<field>` through
 `theme::ActiveTheme`, instead of `rgb(theme::CONSTANT)`. `icon()` and
 `drag_preview()` gained a `cx: &App` parameter to reach the active theme; call

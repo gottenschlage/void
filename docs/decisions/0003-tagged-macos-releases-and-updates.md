@@ -72,6 +72,8 @@ The manifest contains only a stable version, an exact GitHub release-asset URL,
 and a lowercase SHA-256 digest. This avoids GitHub REST quotas and keeps the
 response contract small.
 
+The updater is implemented in the focused `void_update` crate. Its private `updater`, `manifest`, `download`, `macos`, and `status_view` modules separate task ownership, validation, I/O, platform installation, and rendering while exposing only `Updater` to the binary composition root.
+
 The updater uses GPUI's injected HTTP client and asynchronously streams the DMG
 to a temporary installer directory while hashing it. It rejects a checksum
 mismatch before mounting. It then validates the DMG with `codesign` and
@@ -113,7 +115,9 @@ surface requires a separate product decision and platform-specific validation.
   - `crates/zed/resources/app-icon.png`
   - `crates/zed/resources/app-icon@2x.png`
   - `crates/auto_update/src/auto_update.rs::AutoUpdater`
-  - `crates/auto_update/src/auto_update.rs::install_release_macos`
+  - `crates/auto_update/src/auto_update.rs::{AutoUpdater::start_polling,AutoUpdater::poll,AutoUpdater::update}`
+  - `crates/auto_update/src/auto_update.rs::{InstallerDir,MacOsUnmounter,install_release_macos,cleanup_stale_installer_dirs}`
+  - `crates/auto_update_ui/src/auto_update_ui.rs`
   - `script/bundle-mac`
   - `.github/workflows/release.yml`
 - Local Sunware commit `ae562ceff699152c15558ee062f293acacd2de35`:

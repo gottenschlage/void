@@ -38,11 +38,16 @@ jobs:
           test "$(uname -m)" = "arm64"
 
       - name: Run release checks
+        env:
+          RUSTDOCFLAGS: -D warnings
         run: |
-          cargo fmt --check
-          cargo check --workspace
-          cargo clippy --workspace --all-targets --all-features -- -D warnings
-          cargo test --workspace
+          cargo fmt --all --check
+          cargo check --workspace --locked
+          cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+          cargo clippy --workspace --all-targets --all-features --locked -- -D clippy::perf
+          cargo test --workspace --locked
+          cargo doc --workspace --no-deps --locked
+          git diff --check
 
       - name: Install cargo-bundle
         run: cargo install cargo-bundle --version 0.11.0 --locked

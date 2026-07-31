@@ -1,12 +1,13 @@
+use crate::{
+    Branch, NewBranch, Repository, VoidPaths, WorkspaceDb, WorktreeProvenanceCheck,
+    create_git_worktree, local_git_branches, validate_git_branch_request,
+    validate_managed_worktree,
+};
 use gpui::{
     Anchor, Context, EventEmitter, Focusable, MouseButton, MouseDownEvent, MouseUpEvent, Role,
-    Window, actions, anchored, deferred, div, prelude::*, px,
+    Task, Window, actions, anchored, deferred, div, prelude::*, px,
 };
 use theme::ActiveTheme;
-use workspace::{
-    Branch, NewBranch, Repository, VoidPaths, WorkspaceDb, create_git_worktree, local_git_branches,
-    validate_git_branch_request,
-};
 
 use ui::{ListRow, TextInput, dialog, icon, popover};
 
@@ -27,6 +28,8 @@ pub(crate) struct BranchDialog {
     is_loading_branches: bool,
     is_creating: bool,
     focus_name_input: bool,
+    _load_branches_task: Task<()>,
+    create_branch_task: Option<Task<()>>,
     error: Option<String>,
 }
 
@@ -45,11 +48,11 @@ impl BranchDialog {
         });
         let repository_path = repository.path.clone();
         let executor = cx.background_executor().clone();
-        cx.spawn(async move |this, cx| {
+        let load_branches_task = cx.spawn(async move |this, cx| {
             let result = executor
                 .spawn(async move { local_git_branches(&repository_path) })
                 .await;
-            this.update(cx, |this, cx| {
+            let _ = this.update(cx, |this, cx| {
                 this.is_loading_branches = false;
                 match result {
                     Ok(branches) => {
@@ -59,9 +62,8 @@ impl BranchDialog {
                     Err(error) => this.error = Some(error.to_string()),
                 }
                 cx.notify();
-            })
-        })
-        .detach();
+            });
+        });
 
         Self {
             repository,
@@ -73,6 +75,8 @@ impl BranchDialog {
             is_loading_branches: true,
             is_creating: false,
             focus_name_input: true,
+            _load_branches_task: load_branches_task,
+            create_branch_task: None,
             error: None,
         }
     }
@@ -143,7 +147,7 @@ impl BranchDialog {
         let repository = self.repository.clone();
         let position = self.branch_position;
         let executor = cx.background_executor().clone();
-        cx.spawn(async move |this, cx| {
+        let task = cx.spawn(async move |this, cx| {
             let result: Result<Branch, String> = async {
                 let repository_path = repository.path.clone();
                 let requested_name = name.clone();
@@ -159,7 +163,7 @@ impl BranchDialog {
                     .await
                     .map_err(|error| error.to_string())?;
 
-                let branch = database
+                let mut branch = database
                     .reserve_branch(
                         NewBranch {
                             repository_id: repository.id,
@@ -174,34 +178,54 @@ impl BranchDialog {
                     .map_err(|error| format!("Could not reserve branch: {error:#}"))?;
 
                 let repository_path = repository.path.clone();
+                let managed_worktrees_root = paths.worktrees();
                 let branch_name = branch.name.clone();
                 let worktree_path = branch.path.clone();
                 let base_ref = branch.base_ref.clone();
-                if let Err(error) = executor
+                let creation_result = executor
                     .spawn(async move {
                         create_git_worktree(
                             &repository_path,
                             &branch_name,
                             &worktree_path,
                             &base_ref,
+                        )?;
+                        validate_managed_worktree(
+                            &repository_path,
+                            &managed_worktrees_root,
+                            &worktree_path,
+                            &branch_name,
+                            WorktreeProvenanceCheck::CaptureCurrent,
                         )
+                        .map_err(anyhow::Error::from)
                     })
+                    .await;
+                let validated = match creation_result {
+                    Ok(validated) => validated,
+                    Err(error) => {
+                        let archive_result = database.archive_branch(branch.id).await;
+                        return Err(match archive_result {
+                            Ok(()) => error.to_string(),
+                            Err(archive_error) => format!(
+                                "{error}; also failed to archive the reservation: {archive_error:#}"
+                            ),
+                        });
+                    }
+                };
+                let provenance = validated.provenance().clone();
+                database
+                    .record_worktree_provenance(branch.id, provenance.clone())
                     .await
-                {
-                    let archive_result = database.archive_branch(branch.id).await;
-                    return Err(match archive_result {
-                        Ok(()) => error.to_string(),
-                        Err(archive_error) => format!(
-                            "{error}; also failed to archive the reservation: {archive_error:#}"
-                        ),
-                    });
-                }
+                    .map_err(|error| {
+                        format!("Created the worktree but could not record its identity: {error:#}")
+                    })?;
+                branch.worktree_provenance = Some(provenance);
 
                 Ok(branch)
             }
             .await;
 
-            this.update(cx, |this, cx| {
+            let _ = this.update(cx, |this, cx| {
                 this.is_creating = false;
                 match result {
                     Ok(branch) => cx.emit(BranchDialogEvent::Created(branch)),
@@ -210,9 +234,9 @@ impl BranchDialog {
                         cx.notify();
                     }
                 }
-            })
-        })
-        .detach();
+            });
+        });
+        self.create_branch_task = Some(task);
     }
 
     fn render_base_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {

@@ -7422,6 +7422,7 @@ version = "0.1.0"
 dependencies = [
  "gpui",
  "theme",
+ "unicode-segmentation",
 ]
 
 [[package]]
@@ -7708,26 +7709,14 @@ name = "void"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "async-channel 2.5.0",
  "gpui",
  "gpui_platform",
- "notify",
- "objc2-app-kit 0.3.2",
- "petname",
- "raw-window-handle",
  "refineable",
  "rust-embed",
- "semver",
- "serde",
- "serde_json",
  "settings",
- "sha2 0.10.9",
- "smol",
- "tempfile",
  "theme",
- "ui",
- "util",
  "void_terminal",
+ "void_update",
  "workspace",
 ]
 
@@ -7739,6 +7728,22 @@ dependencies = [
  "task",
  "terminal",
  "ui",
+ "util",
+]
+
+[[package]]
+name = "void_update"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "gpui",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "smol",
+ "tempfile",
+ "theme",
  "util",
 ]
 
@@ -9040,12 +9045,21 @@ name = "workspace"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-channel 2.5.0",
  "dirs",
  "gpui",
+ "notify",
+ "objc2-app-kit 0.3.2",
+ "petname",
  "pollster 0.4.0",
+ "raw-window-handle",
  "smol",
  "sqlez",
  "sqlez_macros",
+ "theme",
+ "thiserror 2.0.19",
+ "ui",
+ "void_terminal",
 ]
 
 [[package]]

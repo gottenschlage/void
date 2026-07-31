@@ -9,6 +9,10 @@ use objc2_app_kit::{NSView, NSWindowButton};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
 /// Shows or hides all three native macOS traffic-light buttons.
+#[expect(
+    unsafe_code,
+    reason = "GPUI exposes AppKit only through a validated raw-window-handle pointer"
+)]
 pub(crate) fn set_traffic_lights_visible(window: &Window, visible: bool) -> Result<(), String> {
     let handle = HasWindowHandle::window_handle(window)
         .map_err(|error| format!("could not obtain the native window handle: {error}"))?;

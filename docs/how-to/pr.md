@@ -20,6 +20,24 @@ Before writing the PR:
 
 5. Verify the narrative against the current code. Do not rely on commit titles alone and never invent behavior.
 
+## Remove transient working memory
+
+Before creating or updating the pull request:
+
+1. Read `working-memory.md` and transfer every lasting decision, constraint,
+   limitation, reference, and verification boundary into the appropriate code,
+   tests, documentation, ADR, or commit message.
+2. Confirm completed and deferred work can be reconstructed without the
+   working-memory file.
+3. Remove `working-memory.md`, commit the removal with the final PR preparation
+   changes, and verify it is absent from the branch diff.
+
+Working memory is branch-local execution scaffolding, not a durable project
+artifact. Do not remove it until implementation and validation are complete,
+and do not replace durable documentation with a copy of the working-memory
+file in the PR body. Follow
+[`use-working-memory.md`](use-working-memory.md) throughout multi-phase work.
+
 ## Behavior
 
 - If no PR exists, create one.

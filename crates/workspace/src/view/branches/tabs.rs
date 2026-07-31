@@ -1,13 +1,13 @@
 //! Selectable, closable, draggable tabs for open Void branches.
 
+use crate::{Branch, BranchId};
 use gpui::{
     Context, DragMoveEvent, EventEmitter, MouseButton, MouseDownEvent, MouseUpEvent, Render,
     ScrollHandle, Window, div, prelude::*, px,
 };
 use theme::ActiveTheme;
-use workspace::{Branch, BranchId};
 
-use ui::{auto_scroll_toward_edge, icon_sized, move_item};
+use ui::{auto_scroll_toward_edge, icon_sized};
 
 pub(crate) const HEADER_HEIGHT: f32 = 37.5;
 const TAB_WIDTH: f32 = 165.0;
@@ -20,6 +20,12 @@ pub(crate) struct BranchSelected {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct BranchClosed {
     pub branch_id: BranchId,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct BranchMoved {
+    pub branch_id: BranchId,
+    pub target_index: usize,
 }
 
 #[derive(Clone)]
@@ -37,6 +43,7 @@ pub(crate) struct BranchHeader {
 
 impl EventEmitter<BranchSelected> for BranchHeader {}
 impl EventEmitter<BranchClosed> for BranchHeader {}
+impl EventEmitter<BranchMoved> for BranchHeader {}
 
 impl BranchHeader {
     pub(crate) fn new(branches: Vec<Branch>) -> Self {
@@ -59,49 +66,17 @@ impl BranchHeader {
         cx.notify();
     }
 
-    pub(crate) fn add_branch(&mut self, branch: Branch, cx: &mut Context<Self>) {
-        self.open(branch, cx);
-    }
-
-    pub(crate) fn active_branch_id(&self) -> Option<BranchId> {
-        self.active_branch_id
-    }
-
-    pub(crate) fn open(&mut self, branch: Branch, cx: &mut Context<Self>) {
-        let branch_id = branch.id;
-        if !self.branches.iter().any(|open| open.id == branch_id) {
-            self.branches.push(branch);
+    pub(crate) fn sync(
+        &mut self,
+        branches: Vec<Branch>,
+        active_branch_id: Option<BranchId>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.branches != branches || self.active_branch_id != active_branch_id {
+            self.branches = branches;
+            self.active_branch_id = active_branch_id;
+            cx.notify();
         }
-        self.select(branch_id, cx);
-    }
-
-    pub(crate) fn select(&mut self, branch_id: BranchId, cx: &mut Context<Self>) {
-        if self.active_branch_id == Some(branch_id)
-            || !self.branches.iter().any(|branch| branch.id == branch_id)
-        {
-            return;
-        }
-        self.active_branch_id = Some(branch_id);
-        cx.notify();
-    }
-
-    pub(crate) fn archive(&mut self, branch_id: BranchId, cx: &mut Context<Self>) {
-        let Some(index) = self
-            .branches
-            .iter()
-            .position(|branch| branch.id == branch_id)
-        else {
-            return;
-        };
-        self.branches.remove(index);
-        if self.active_branch_id == Some(branch_id) {
-            self.active_branch_id = fallback_index_after_close(index, self.branches.len())
-                .map(|index| self.branches[index].id);
-            if let Some(branch_id) = self.active_branch_id {
-                cx.emit(BranchSelected { branch_id });
-            }
-        }
-        cx.notify();
     }
 
     fn click_branch(
@@ -111,7 +86,6 @@ impl BranchHeader {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.select(branch_id, cx);
         cx.emit(BranchSelected { branch_id });
     }
 
@@ -126,25 +100,8 @@ impl BranchHeader {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(index) = self
-            .branches
-            .iter()
-            .position(|branch| branch.id == branch_id)
-        else {
-            return;
-        };
-
-        self.branches.remove(index);
-        if self.active_branch_id == Some(branch_id) {
-            self.active_branch_id = fallback_index_after_close(index, self.branches.len())
-                .map(|index| self.branches[index].id);
-        }
         cx.stop_propagation();
         cx.emit(BranchClosed { branch_id });
-        if let Some(branch_id) = self.active_branch_id {
-            cx.emit(BranchSelected { branch_id });
-        }
-        cx.notify();
     }
 
     fn drop_branch(
@@ -160,9 +117,14 @@ impl BranchHeader {
         else {
             return;
         };
+        if source_index == target_index || target_index >= self.branches.len() {
+            return;
+        }
 
-        move_item(&mut self.branches, source_index, target_index);
-        cx.notify();
+        cx.emit(BranchMoved {
+            branch_id: dragged.branch_id,
+            target_index,
+        });
     }
 }
 
@@ -295,21 +257,5 @@ impl Render for DraggedBranch {
             .shadow_md()
             .text_color(cx.theme().colors().text)
             .child(self.label.clone())
-    }
-}
-
-fn fallback_index_after_close(closed_index: usize, remaining_len: usize) -> Option<usize> {
-    (remaining_len > 0).then(|| closed_index.min(remaining_len - 1))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::fallback_index_after_close;
-
-    #[test]
-    fn closing_uses_the_right_neighbor_then_the_left() {
-        assert_eq!(fallback_index_after_close(1, 2), Some(1));
-        assert_eq!(fallback_index_after_close(2, 2), Some(1));
-        assert_eq!(fallback_index_after_close(0, 0), None);
     }
 }

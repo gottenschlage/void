@@ -2,9 +2,9 @@
 
 ![Void workspace](assets/screenshot.png)
 
-Void is an AI-first coding workspace for running coding agents concurrently in isolated Git branches and worktrees. It is built in Rust with [GPUI](https://gpui.rs/), Zed's GPU-accelerated UI framework.
+Void is an AI-first coding workspace foundation built in Rust with [GPUI](https://gpui.rs/), Zed's GPU-accelerated UI framework.
 
-The repository contains the native GPUI application shell, first-launch workspace and repository onboarding, managed branch/worktree creation, a repository sidebar, PTY-backed branch terminals, and SQLite persistence for Void's workspace hierarchy.
+The implemented application contains a native GPUI shell, first-launch workspace and repository onboarding, isolated managed branch/worktree creation, a repository sidebar, PTY-backed branch terminals, SQLite persistence, live diff summaries, and authenticated stable macOS updates. It does not yet launch or model coding agents.
 
 ## Prerequisites
 
@@ -86,10 +86,13 @@ manually.
 ## Validate
 
 ```sh
-cargo fmt --check
-cargo check --workspace
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace
+cargo fmt --all --check
+cargo check --workspace --locked
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+cargo clippy --workspace --all-targets --all-features --locked -- -D clippy::perf
+cargo test --workspace --locked
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
+git diff --check
 ```
 
 ## Repository layout
@@ -98,8 +101,10 @@ cargo test --workspace
 .
 ├── crates/
 │   ├── void/          # Thin native application crate and composition root
+│   ├── ui/            # Domain-independent GPUI controls
 │   ├── void_terminal/ # PTY-backed terminal sessions and rendering
-│   └── workspace/     # Application paths and workspace-domain persistence
+│   ├── void_update/   # Authenticated stable macOS updater and status UI
+│   └── workspace/     # Workspace model, persistence, Git, and product UI
 ├── assets/            # README and project imagery
 ├── docs/
 │   ├── architecture.md
@@ -112,7 +117,7 @@ cargo test --workspace
 └── rust-toolchain.toml
 ```
 
-See [`docs/architecture.md`](docs/architecture.md) for the current boundaries and lifecycle.
+See [`docs/architecture.md`](docs/architecture.md) for the current boundaries and lifecycle. Before a release, exercise the maintainer-run [`docs/how-to/smoke-test.md`](docs/how-to/smoke-test.md) checklist in disposable repositories and a signed release environment.
 
 ## GPUI and Zed references
 

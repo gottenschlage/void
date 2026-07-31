@@ -137,11 +137,18 @@ accepted by the stable updater.
 Run the repository checks:
 
 ```sh
-cargo fmt --check
-cargo check --workspace
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace
+cargo fmt --all --check
+cargo check --workspace --locked
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+cargo clippy --workspace --all-targets --all-features --locked -- -D clippy::perf
+cargo test --workspace --locked
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
+git diff --check
 ```
+
+Complete [`smoke-test.md`](smoke-test.md) in disposable repositories and the
+signed release environment, and record any intentionally deferred
+platform-specific cases.
 
 Commit and push the version change before creating the tag. Do not tag
 uncommitted work.

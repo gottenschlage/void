@@ -102,3 +102,7 @@ of repeating the chrome inline.
 - Zed `crates/zed/src/` (thin binary crate; feature crates hold all UI)
 - Zed `crates/theme/Cargo.toml::[lib] path = "src/theme.rs"` (crate-root file
   named after the crate, not `lib.rs` — same pattern used for `ui/src/ui.rs`)
+
+## Implementation update
+
+ADR 0011 later moved the product screens from the binary into `workspace`, preserving this decision's dependency direction. ADR 0014 split the low-level text-input element from its entity/input state and added `unicode-segmentation` for correct extended-grapheme movement. `ui` therefore still depends only on domain-independent rendering and Unicode support: `gpui`, `theme`, and `unicode-segmentation`.

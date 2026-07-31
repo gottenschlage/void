@@ -1,9 +1,20 @@
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::expect_used,
+        clippy::panic,
+        clippy::unimplemented,
+        clippy::unreachable,
+        clippy::unwrap_used
+    )
+)]
+
 //! Void's reusable, domain-agnostic UI primitives.
 //!
 //! Every type here renders with only `gpui` and `theme` — no knowledge of
 //! Void's product types (`Branch`, `Repository`, ...). Screen-specific
-//! components that compose these primitives with domain types stay in
-//! `crates/void`.
+//! components that compose these primitives with domain types stay in their
+//! owning product crates, currently `workspace`.
 
 mod auto_scroll;
 mod dialog;

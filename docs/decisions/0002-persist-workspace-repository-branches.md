@@ -66,6 +66,10 @@ Verified against Zed commit `5e549b871fb87d1038d9b1b242bf7d4d4e3b4d8f`:
 - `crates/recent_projects/src/recent_projects.rs::get_branch_for_worktree`
 - `crates/collab/src/db/tables/project_repository.rs`
 
+## Implementation note
+
+Managed Git branches, dedicated worktrees, terminals, and safe deletion now exist, but no coding-agent runtime or agent-to-branch association has been implemented. References to agents above describe the motivating product model, not current executable behavior.
+
 SQLite references:
 
 - <https://www.sqlite.org/stricttables.html>

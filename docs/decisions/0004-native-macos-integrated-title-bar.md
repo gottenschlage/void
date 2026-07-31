@@ -69,6 +69,10 @@ implementation retains and reapplies.
 - The small unsafe boundary is isolated, documented, and covered by a pure
   visibility-policy test; AppKit integration still requires manual macOS QA.
 
+## Implementation note
+
+ADR 0011 later moved this state and title-bar implementation into the `workspace` crate and renamed the coordinator from `VoidRoot` to `WorkspaceView`; the ownership and behavior decided here are unchanged.
+
 ## References
 
 - Zed commit `5e549b871fb87d1038d9b1b242bf7d4d4e3b4d8f`

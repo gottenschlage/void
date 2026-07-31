@@ -11,9 +11,12 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
+async-channel.workspace = true
 gpui.workspace = true
 gpui_platform = { workspace = true, features = ["font-kit", "wayland", "x11"] }
+notify.workspace = true
 petname.workspace = true
+refineable.workspace = true
 rust-embed.workspace = true
 semver.workspace = true
 serde.workspace = true
@@ -24,6 +27,7 @@ settings.workspace = true
 tempfile.workspace = true
 theme.workspace = true
 util.workspace = true
+ui = { path = "../ui" }
 workspace = { path = "../workspace" }
 void_terminal = { path = "../void_terminal" }
 
@@ -37,6 +41,7 @@ gpui = { workspace = true, features = ["test-support"] }
 [package.metadata.bundle]
 name = "Void"
 identifier = "com.void.desktop"
+icon = ["resources/app-icon@2x.png", "resources/app-icon.png"]
 category = "Developer Tool"
 short_description = "An AI-first coding workspace for parallel coding agents."
 copyright = "Copyright © 2026 Usama Asfar"

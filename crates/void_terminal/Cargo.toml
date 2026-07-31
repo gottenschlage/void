@@ -13,4 +13,5 @@ workspace = true
 gpui.workspace = true
 task.workspace = true
 terminal.workspace = true
+ui = { path = "../ui" }
 util.workspace = true

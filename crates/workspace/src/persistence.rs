@@ -441,6 +441,21 @@ impl WorkspaceDb {
             .context("failed to archive branch")
     }
 
+    /// Permanently removes a branch's record.
+    ///
+    /// Callers must remove the branch's Git worktree and local branch first;
+    /// this does not touch the filesystem or Git state.
+    pub async fn delete_branch(&self, branch_id: BranchId) -> Result<()> {
+        self.connection
+            .write(move |connection| {
+                connection.exec_bound::<BranchId>(sql!(
+                    DELETE FROM branches WHERE id = ?
+                ))?(branch_id)
+            })
+            .await
+            .context("failed to delete branch")
+    }
+
     /// Persists the visible branch order within one repository.
     pub async fn reorder_branches(
         &self,
@@ -721,6 +736,54 @@ mod tests {
                 second.path,
                 Path::new("/data/Void/worktrees/app/fix-auth-2")
             );
+            Ok::<_, anyhow::Error>(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn deleting_a_branch_removes_its_record_and_frees_its_name() {
+        pollster::block_on(async {
+            let db = WorkspaceDb::open_test().await?;
+            let workspace_id = db.create_workspace("Void".into()).await?;
+            let repository_id = db
+                .add_repository(NewRepository {
+                    workspace_id,
+                    name: "app".into(),
+                    path: "/code/app".into(),
+                    position: 0,
+                    is_pinned: false,
+                })
+                .await?;
+            let branch = db
+                .reserve_branch(
+                    NewBranch {
+                        repository_id,
+                        requested_name: "fix-auth".into(),
+                        base_ref: "refs/heads/main".into(),
+                        position: 0,
+                        is_pinned: false,
+                    },
+                    &test_paths(),
+                )
+                .await?;
+
+            db.delete_branch(branch.id).await?;
+            assert_eq!(db.branches(repository_id)?, vec![]);
+
+            let recreated = db
+                .reserve_branch(
+                    NewBranch {
+                        repository_id,
+                        requested_name: "fix-auth".into(),
+                        base_ref: "refs/heads/main".into(),
+                        position: 0,
+                        is_pinned: false,
+                    },
+                    &test_paths(),
+                )
+                .await?;
+            assert_eq!(recreated.name, "fix-auth");
             Ok::<_, anyhow::Error>(())
         })
         .unwrap();

@@ -7,15 +7,17 @@
 use std::{collections::HashMap, path::PathBuf, time::Duration};
 
 use gpui::{
-    App, Context, Entity, EventEmitter, ExternalPaths, FocusHandle, Focusable, KeyBinding,
-    KeyDownEvent, ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    Render, ScrollWheelEvent, Subscription, Window, actions, div, prelude::*, px, rgb,
+    App, Context, DragMoveEvent, Entity, EventEmitter, ExternalPaths, FocusHandle, Focusable,
+    KeyBinding, KeyDownEvent, ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, Render, ScrollHandle, ScrollWheelEvent, Subscription, Window, actions, div,
+    prelude::*, px, rgb,
 };
 use task::Shell;
 use terminal::{
     Event as TerminalEvent, Terminal, TerminalBuilder,
     terminal_settings::{AlternateScroll, CursorShape},
 };
+use ui::{auto_scroll_toward_edge, move_item};
 use util::paths::PathStyle;
 
 mod terminal_element;
@@ -121,6 +123,9 @@ struct TerminalSession {
     marked_text: Option<String>,
     cursor_visible: bool,
     terminal_blinking: bool,
+    focused: bool,
+    blink_epoch: usize,
+    _focus_subscriptions: [Subscription; 2],
 }
 
 impl TerminalSession {
@@ -128,9 +133,12 @@ impl TerminalSession {
         id: TerminalId,
         working_directory: PathBuf,
         settings: TerminalSettings,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let focus = cx.focus_handle();
+        let focus_in = cx.on_focus_in(&focus, window, |this, _, cx| this.focus_in(cx));
+        let focus_out = cx.on_focus_out(&focus, window, |this, _, _, cx| this.focus_out(cx));
         let task = TerminalBuilder::new(
             Some(working_directory),
             None,
@@ -161,7 +169,7 @@ impl TerminalSession {
                                 }
                                 TerminalEvent::BlinkChanged(blinking) => {
                                     this.terminal_blinking = *blinking;
-                                    this.cursor_visible = true;
+                                    this.restart_blink(cx);
                                 }
                                 _ => {}
                             }
@@ -180,25 +188,6 @@ impl TerminalSession {
             })
         })
         .detach();
-        cx.spawn(async move |this, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(500))
-                    .await;
-                if this
-                    .update(cx, |this, cx| {
-                        if this.settings.cursor_blinks && this.terminal_blinking {
-                            this.cursor_visible = !this.cursor_visible;
-                            cx.notify();
-                        }
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
         Self {
             id,
             focus,
@@ -207,7 +196,86 @@ impl TerminalSession {
             marked_text: None,
             cursor_visible: true,
             terminal_blinking: true,
+            focused: false,
+            blink_epoch: 0,
+            _focus_subscriptions: [focus_in, focus_out],
         }
+    }
+
+    /// Shows the cursor steadily while unfocused, blur-paused, or blinking is
+    /// off; otherwise restarts the blink cycle from a visible cursor.
+    fn should_blink(&self) -> bool {
+        self.focused && self.settings.cursor_blinks && self.terminal_blinking
+    }
+
+    fn restart_blink(&mut self, cx: &mut Context<Self>) {
+        self.cursor_visible = true;
+        self.blink_epoch += 1;
+        if self.should_blink() {
+            self.schedule_blink(self.blink_epoch, cx);
+        }
+        cx.notify();
+    }
+
+    /// Schedules one blink tick. A tick only acts if `epoch` still matches
+    /// `self.blink_epoch`, which lets focus changes and keystrokes invalidate
+    /// any tick already in flight simply by bumping the epoch.
+    fn schedule_blink(&self, epoch: usize, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(500))
+                .await;
+            this.update(cx, |this, cx| this.tick_blink(epoch, cx)).ok();
+        })
+        .detach();
+    }
+
+    fn tick_blink(&mut self, epoch: usize, cx: &mut Context<Self>) {
+        if epoch != self.blink_epoch || !self.should_blink() {
+            return;
+        }
+        self.cursor_visible = !self.cursor_visible;
+        cx.notify();
+        self.schedule_blink(epoch, cx);
+    }
+
+    /// Shows the cursor and holds it steady for 500ms, mirroring Zed's
+    /// `BlinkManager::pause_blinking` so the cursor doesn't blink off mid-keystroke.
+    fn pause_blink(&mut self, cx: &mut Context<Self>) {
+        self.cursor_visible = true;
+        self.blink_epoch += 1;
+        if !self.should_blink() {
+            return;
+        }
+        let epoch = self.blink_epoch;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(500))
+                .await;
+            this.update(cx, |this, cx| {
+                if epoch == this.blink_epoch {
+                    this.schedule_blink(epoch, cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn focus_in(&mut self, cx: &mut Context<Self>) {
+        self.focused = true;
+        if let SessionState::Ready { terminal, .. } = &self.state {
+            terminal.read(cx).focus_in();
+        }
+        self.restart_blink(cx);
+    }
+
+    fn focus_out(&mut self, cx: &mut Context<Self>) {
+        self.focused = false;
+        if let SessionState::Ready { terminal, .. } = &self.state {
+            terminal.update(cx, |terminal, _| terminal.focus_out());
+        }
+        self.restart_blink(cx);
     }
 
     fn label(&self, cx: &App) -> String {
@@ -219,14 +287,16 @@ impl TerminalSession {
     }
 
     fn key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
-        if let SessionState::Ready { terminal, .. } = &self.state {
-            self.cursor_visible = true;
-            let handled = terminal.update(cx, |terminal, _| {
-                terminal.try_keystroke(&event.keystroke, self.settings.option_as_meta)
-            });
-            if handled {
-                cx.stop_propagation();
-            }
+        let SessionState::Ready { terminal, .. } = &self.state else {
+            return;
+        };
+        let terminal = terminal.clone();
+        self.pause_blink(cx);
+        let handled = terminal.update(cx, |terminal, _| {
+            terminal.try_keystroke(&event.keystroke, self.settings.option_as_meta)
+        });
+        if handled {
+            cx.stop_propagation();
         }
     }
 
@@ -364,7 +434,9 @@ pub struct BranchTerminalPanel {
     working_directory: PathBuf,
     settings: TerminalSettings,
     sessions: HashMap<TerminalId, Entity<TerminalSession>>,
+    session_observations: HashMap<TerminalId, Subscription>,
     tabs: TerminalTabs,
+    tabs_scroll: ScrollHandle,
 }
 
 #[derive(Default)]
@@ -402,17 +474,16 @@ impl TerminalTabs {
         Some(was_active)
     }
 
+    /// Moves `id` to sit at `target`, live, as the drag hovers over it.
+    /// No-op once it's already there.
     fn reorder(&mut self, id: TerminalId, target: usize) {
         let Some(source) = self.order.iter().position(|candidate| *candidate == id) else {
             return;
         };
-        let id = self.order.remove(source);
-        let target = if source < target {
-            target.saturating_sub(1)
-        } else {
-            target
-        };
-        self.order.insert(target.min(self.order.len()), id);
+        if source == target {
+            return;
+        }
+        move_item(&mut self.order, source, target);
     }
 }
 
@@ -422,8 +493,22 @@ impl BranchTerminalPanel {
             working_directory,
             settings,
             sessions: HashMap::new(),
+            session_observations: HashMap::new(),
             tabs: TerminalTabs::default(),
+            tabs_scroll: ScrollHandle::new(),
         }
+    }
+
+    /// Scrolls the tab bar toward the cursor's edge while a tab is being
+    /// dragged, so a target scrolled out of view can still be reached.
+    fn scroll_toward_drag(
+        &mut self,
+        event: &DragMoveEvent<DraggedTerminal>,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        auto_scroll_toward_edge(&self.tabs_scroll, event.event.position, event.bounds);
+        cx.notify();
     }
 
     pub fn activate(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -445,10 +530,13 @@ impl BranchTerminalPanel {
                 id,
                 self.working_directory.clone(),
                 self.settings.clone(),
+                window,
                 cx,
             )
         });
+        let observation = cx.observe(&session, |_, _, cx| cx.notify());
         self.sessions.insert(id, session);
+        self.session_observations.insert(id, observation);
         self.focus_active(window, cx);
         cx.notify();
     }
@@ -476,6 +564,7 @@ impl BranchTerminalPanel {
             return;
         };
         self.sessions.remove(&id);
+        self.session_observations.remove(&id);
         if self.tabs.order.is_empty() {
             self.new_terminal(window, cx);
             return;
@@ -486,8 +575,8 @@ impl BranchTerminalPanel {
         cx.notify();
     }
 
-    fn reorder(&mut self, dragged: &DraggedTerminal, target: usize, cx: &mut Context<Self>) {
-        self.tabs.reorder(dragged.id, target);
+    fn reorder(&mut self, id: TerminalId, target: usize, cx: &mut Context<Self>) {
+        self.tabs.reorder(id, target);
         cx.notify();
     }
 }
@@ -508,6 +597,8 @@ impl Render for BranchTerminalPanel {
                     .h(px(TAB_HEIGHT))
                     .flex_none()
                     .overflow_x_scroll()
+                    .track_scroll(&self.tabs_scroll)
+                    .on_drag_move::<DraggedTerminal>(cx.listener(Self::scroll_toward_drag))
                     .border_b_1()
                     .border_color(rgb(0x2b2b2b))
                     .child(
@@ -541,6 +632,8 @@ impl Render for BranchTerminalPanel {
                             .items_center()
                             .px_3()
                             .gap_2()
+                            .border_r_1()
+                            .border_color(rgb(0x2b2b2b))
                             .when(is_active, |tab| tab.bg(rgb(0x252526)))
                             .on_mouse_down(
                                 MouseButton::Left,
@@ -558,16 +651,24 @@ impl Render for BranchTerminalPanel {
                             .drag_over::<DraggedTerminal>(|style, _, _, _| {
                                 style.border_l_2().border_color(rgb(0x3794ff))
                             })
-                            .on_drop(cx.listener(move |this, dragged, _, cx| {
-                                this.reorder(dragged, index, cx);
+                            .on_drop(cx.listener(move |this, dragged: &DraggedTerminal, _, cx| {
+                                this.reorder(dragged.id, index, cx);
                             }))
                             .child(div().min_w_0().flex_1().truncate().child(label))
                             .child(
                                 div()
                                     .id(("close-terminal", id.0))
+                                    .flex()
+                                    .flex_none()
+                                    .size(px(16.))
+                                    .items_center()
+                                    .justify_center()
+                                    .rounded_sm()
+                                    .text_sm()
                                     .opacity(0.)
                                     .group_hover("terminal-tab", |button| button.opacity(1.))
                                     .cursor_pointer()
+                                    .hover(|button| button.bg(rgb(0x3a3a3a)))
                                     .on_mouse_down(
                                         MouseButton::Left,
                                         cx.listener(move |this, _, window, cx| {
@@ -633,8 +734,8 @@ mod tests {
         let third = tabs.insert_new();
 
         tabs.reorder(third, 2);
-        assert_eq!(tabs.order, [second, third, first]);
-        tabs.reorder(first, 0);
-        assert_eq!(tabs.order, [first, second, third]);
+        assert_eq!(tabs.order, [second, first, third]);
+        tabs.reorder(third, 0);
+        assert_eq!(tabs.order, [third, second, first]);
     }
 }

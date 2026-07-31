@@ -4,13 +4,12 @@ use gpui::{
     App, Bounds, ClipboardItem, Context, CursorStyle, Element, ElementId, ElementInputHandler,
     Entity, EntityInputHandler, FocusHandle, Focusable, GlobalElementId, IntoElement, LayoutId,
     MouseButton, MouseDownEvent, PaintQuad, Pixels, Role, SharedString, Style, TextRun,
-    UTF16Selection, Window, actions, div, fill, hsla, point, prelude::*, px, relative, rgb, size,
+    UTF16Selection, Window, actions, div, fill, hsla, point, prelude::*, px, relative, size,
 };
-
-use crate::theme;
+use theme::ActiveTheme;
 
 actions!(
-    workspace_name_input,
+    text_input,
     [
         Backspace,
         Copy,
@@ -25,7 +24,7 @@ actions!(
     ]
 );
 
-pub(crate) struct TextInput {
+pub struct TextInput {
     focus_handle: FocusHandle,
     content: SharedString,
     placeholder: SharedString,
@@ -36,7 +35,7 @@ pub(crate) struct TextInput {
 }
 
 impl TextInput {
-    pub(crate) fn new(placeholder: impl Into<SharedString>, cx: &mut Context<Self>) -> Self {
+    pub fn new(placeholder: impl Into<SharedString>, cx: &mut Context<Self>) -> Self {
         Self {
             focus_handle: cx.focus_handle(),
             content: "".into(),
@@ -48,11 +47,11 @@ impl TextInput {
         }
     }
 
-    pub(crate) fn text(&self) -> &str {
+    pub fn text(&self) -> &str {
         &self.content
     }
 
-    pub(crate) fn set_text(&mut self, text: impl Into<SharedString>, cx: &mut Context<Self>) {
+    pub fn set_text(&mut self, text: impl Into<SharedString>, cx: &mut Context<Self>) {
         self.content = text.into();
         self.selected_range = self.content.len()..self.content.len();
         self.marked_range = None;
@@ -371,7 +370,7 @@ impl Element for InputElement {
         let (text, color) = if input.content.is_empty() {
             (
                 input.placeholder.clone(),
-                rgb(theme::TEXT_PLACEHOLDER).into(),
+                cx.theme().colors().text_placeholder,
             )
         } else {
             (input.content.clone(), window.text_style().color)
@@ -489,13 +488,13 @@ impl Render for TextInput {
             .h(px(32.))
             .px_2()
             .rounded_sm()
-            .bg(rgb(theme::ELEMENT))
+            .bg(cx.theme().colors().element_background)
             .border_1()
-            .border_color(rgb(if is_focused {
-                theme::BORDER_FOCUSED
+            .border_color(if is_focused {
+                cx.theme().colors().border_focused
             } else {
-                theme::BORDER
-            }))
+                cx.theme().colors().border
+            })
             .child(InputElement { input: cx.entity() })
     }
 }

@@ -1,16 +1,21 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use gpui::{
-    Anchor, Context, EventEmitter, MouseButton, MouseDownEvent, MouseUpEvent, PathPromptOptions,
-    Role, Window, anchored, deferred, div, point, prelude::*, px, rgb,
+    Anchor, App, Context, DragMoveEvent, Entity, EventEmitter, MouseButton, MouseDownEvent,
+    MouseUpEvent, PathPromptOptions, PromptLevel, Role, ScrollHandle, Subscription, Window,
+    anchored, deferred, div, point, prelude::*, px,
 };
+use theme::ActiveTheme;
 use workspace::{
     Branch, BranchId, NewRepository, Repository, RepositoryId, Workspace, WorkspaceDb,
-    inspect_git_repository,
+    delete_git_worktree, inspect_git_repository,
 };
 
-use crate::branch_header::{BranchSelected, HEADER_HEIGHT};
-use crate::{icons::icon, theme};
+use crate::{
+    branch_context_header::RepositoryLiveDiff,
+    branch_header::{BranchSelected, HEADER_HEIGHT},
+};
+use ui::{ListRow, auto_scroll_toward_edge, icon, move_item, popover};
 
 pub(crate) struct AddBranchRequested {
     pub repository: Repository,
@@ -59,6 +64,9 @@ pub(crate) struct Sidebar {
     updating_branches: HashSet<BranchId>,
     error: Option<String>,
     active_branch_id: Option<workspace::BranchId>,
+    live_diffs: HashMap<RepositoryId, Entity<RepositoryLiveDiff>>,
+    live_diff_subscriptions: HashMap<RepositoryId, Subscription>,
+    repository_list_scroll: ScrollHandle,
 }
 
 impl EventEmitter<AddBranchRequested> for Sidebar {}
@@ -82,7 +90,31 @@ impl Sidebar {
             updating_branches: HashSet::new(),
             error: None,
             active_branch_id: None,
+            live_diffs: HashMap::new(),
+            live_diff_subscriptions: HashMap::new(),
+            repository_list_scroll: ScrollHandle::new(),
         }
+    }
+
+    pub(crate) fn observe_live_diff(
+        &mut self,
+        repository_id: RepositoryId,
+        live_diff: Entity<RepositoryLiveDiff>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.live_diffs.contains_key(&repository_id) {
+            return;
+        }
+
+        let subscription = cx.observe(&live_diff, |_, _, cx| cx.notify());
+        self.live_diffs.insert(repository_id, live_diff);
+        self.live_diff_subscriptions
+            .insert(repository_id, subscription);
+    }
+
+    pub(crate) fn forget_live_diff(&mut self, repository_id: RepositoryId) {
+        self.live_diffs.remove(&repository_id);
+        self.live_diff_subscriptions.remove(&repository_id);
     }
 
     pub(crate) fn select_branch(&mut self, branch_id: workspace::BranchId, cx: &mut Context<Self>) {
@@ -90,6 +122,23 @@ impl Sidebar {
             self.active_branch_id = Some(branch_id);
             cx.notify();
         }
+    }
+
+    /// Scrolls the repository list toward the cursor's edge while a
+    /// repository or branch row is being dragged, so a target scrolled out
+    /// of view can still be reached.
+    fn scroll_toward_drag<T: 'static>(
+        &mut self,
+        event: &DragMoveEvent<T>,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        auto_scroll_toward_edge(
+            &self.repository_list_scroll,
+            event.event.position,
+            event.bounds,
+        );
+        cx.notify();
     }
 
     pub(crate) fn clear_selection(&mut self, cx: &mut Context<Self>) {
@@ -457,6 +506,84 @@ impl Sidebar {
         .detach();
     }
 
+    /// Prompts for confirmation, then permanently deletes a branch: its
+    /// worktree, its local Git branch, and its persisted record.
+    fn delete_branch(&mut self, branch_id: BranchId, window: &mut Window, cx: &mut Context<Self>) {
+        if self.updating_branches.contains(&branch_id) {
+            return;
+        }
+        let Some((repository_path, branch)) = self.repositories.iter().find_map(|entry| {
+            entry
+                .branches
+                .iter()
+                .find(|branch| branch.id == branch_id)
+                .map(|branch| (entry.repository.path.clone(), branch.clone()))
+        }) else {
+            return;
+        };
+
+        let prompt = format!("Delete branch \"{}\"?", branch.name);
+        let answer = window.prompt(
+            PromptLevel::Critical,
+            &prompt,
+            Some("This deletes the branch and its worktree. This cannot be undone."),
+            &["Delete", "Cancel"],
+            cx,
+        );
+
+        let database = cx.global::<WorkspaceDb>().clone();
+        let executor = cx.background_executor().clone();
+        cx.spawn_in(window, async move |this, cx| {
+            if answer.await != Ok(0) {
+                return;
+            }
+            if this
+                .update(cx, |this, cx| {
+                    this.updating_branches.insert(branch_id);
+                    this.error = None;
+                    cx.notify();
+                })
+                .is_err()
+            {
+                return;
+            }
+
+            let branch_name = branch.name.clone();
+            let worktree_path = branch.path.clone();
+            let result = executor
+                .spawn(async move {
+                    delete_git_worktree(&repository_path, &worktree_path, &branch_name)
+                })
+                .await
+                .map_err(|error| format!("Could not delete the worktree: {error:#}"));
+            let result = match result {
+                Ok(()) => database
+                    .delete_branch(branch_id)
+                    .await
+                    .map_err(|error| format!("Could not delete branch: {error:#}")),
+                Err(error) => Err(error),
+            };
+
+            let _ = this.update(cx, |this, cx| {
+                this.updating_branches.remove(&branch_id);
+                match result {
+                    Ok(()) => {
+                        for entry in this.repositories.iter_mut() {
+                            entry.branches.retain(|branch| branch.id != branch_id);
+                        }
+                        if this.active_branch_id == Some(branch_id) {
+                            this.active_branch_id = None;
+                        }
+                        cx.emit(BranchArchived { branch_id });
+                    }
+                    Err(error) => this.error = Some(error),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     fn restore_repository(
         &mut self,
         repository_id: RepositoryId,
@@ -502,14 +629,9 @@ impl Sidebar {
                 .anchor(Anchor::TopLeft)
                 .position(point(px(8.0), px(HEADER_HEIGHT + 60.0)))
                 .child(
-                    div()
+                    popover(cx)
                         .w(px(224.))
                         .p_1()
-                        .rounded_md()
-                        .bg(rgb(theme::ELEVATED_SURFACE))
-                        .border_1()
-                        .border_color(rgb(theme::BORDER))
-                        .shadow_md()
                         .on_mouse_down_out(cx.listener(Self::dismiss_menu))
                         .children(
                             self.repositories
@@ -527,19 +649,17 @@ impl Sidebar {
                                     div()
                                         .id(("workspace-repository", repository_id.as_i64() as u64))
                                         .group("workspace-repository")
-                                        .flex()
-                                        .h(px(32.))
-                                        .items_center()
+                                        .list_row(32.)
                                         .gap_1()
-                                        .px_2()
-                                        .rounded_sm()
-                                        .text_sm()
                                         .when(is_updating, |row| row.opacity(0.5))
                                         .when(!is_updating, |row| {
-                                            row.hover(|row| row.bg(rgb(theme::ELEMENT_HOVER)))
+                                            row.hover(|row| {
+                                                row.bg(cx.theme().colors().element_hover)
+                                            })
                                         })
-                                        .drag_over::<DraggedRepository>(|row, _, _, _| {
-                                            row.border_b_2().border_color(rgb(theme::ACCENT))
+                                        .drag_over::<DraggedRepository>(|row, _, _, cx| {
+                                            row.border_b_2()
+                                                .border_color(cx.theme().colors().text_accent)
                                         })
                                         .on_drop(cx.listener(move |this, dragged, window, cx| {
                                             this.drop_repository(
@@ -577,7 +697,7 @@ impl Sidebar {
                                                 .rounded_sm()
                                                 .cursor_pointer()
                                                 .hover(|button| {
-                                                    button.bg(rgb(theme::ELEMENT_ACTIVE))
+                                                    button.bg(cx.theme().colors().element_active)
                                                 })
                                                 .on_mouse_up(
                                                     MouseButton::Left,
@@ -593,11 +713,14 @@ impl Sidebar {
                                                         }
                                                     }),
                                                 )
-                                                .child(icon(if is_pinned {
-                                                    "icons/pin-off.svg"
-                                                } else {
-                                                    "icons/pin.svg"
-                                                })),
+                                                .child(icon(
+                                                    if is_pinned {
+                                                        "icons/pin-off.svg"
+                                                    } else {
+                                                        "icons/pin.svg"
+                                                    },
+                                                    cx,
+                                                )),
                                         )
                                         .child(
                                             div()
@@ -612,7 +735,7 @@ impl Sidebar {
                                                 .rounded_sm()
                                                 .cursor_pointer()
                                                 .hover(|button| {
-                                                    button.bg(rgb(theme::ELEMENT_ACTIVE))
+                                                    button.bg(cx.theme().colors().element_active)
                                                 })
                                                 .on_mouse_up(
                                                     MouseButton::Left,
@@ -627,7 +750,7 @@ impl Sidebar {
                                                         }
                                                     }),
                                                 )
-                                                .child(icon("icons/archive.svg")),
+                                                .child(icon("icons/archive.svg", cx)),
                                         )
                                 }),
                         )
@@ -637,7 +760,11 @@ impl Sidebar {
                                 .any(|entry| entry.repository.archived_at.is_some()),
                             |menu| {
                                 menu.child(
-                                    div().h(px(1.)).mx_1().my_1().bg(rgb(theme::BORDER_VARIANT)),
+                                    div()
+                                        .h(px(1.))
+                                        .mx_1()
+                                        .my_1()
+                                        .bg(cx.theme().colors().border_variant),
                                 )
                                 .children(
                                     self.repositories
@@ -653,18 +780,13 @@ impl Sidebar {
                                                     repository_id.as_i64() as u64,
                                                 ))
                                                 .group("archived-workspace-repository")
-                                                .flex()
-                                                .h(px(32.))
-                                                .items_center()
+                                                .list_row(32.)
                                                 .gap_1()
-                                                .px_2()
-                                                .rounded_sm()
-                                                .text_sm()
-                                                .text_color(rgb(theme::TEXT_MUTED))
+                                                .text_color(cx.theme().colors().text_muted)
                                                 .when(is_updating, |row| row.opacity(0.5))
                                                 .when(!is_updating, |row| {
                                                     row.hover(|row| {
-                                                        row.bg(rgb(theme::ELEMENT_HOVER))
+                                                        row.bg(cx.theme().colors().element_hover)
                                                     })
                                                 })
                                                 .child(
@@ -687,7 +809,10 @@ impl Sidebar {
                                                         .rounded_sm()
                                                         .cursor_pointer()
                                                         .hover(|button| {
-                                                            button.bg(rgb(theme::ELEMENT_ACTIVE))
+                                                            button.bg(cx
+                                                                .theme()
+                                                                .colors()
+                                                                .element_active)
                                                         })
                                                         .on_mouse_up(
                                                             MouseButton::Left,
@@ -704,13 +829,22 @@ impl Sidebar {
                                                                 },
                                                             ),
                                                         )
-                                                        .child(icon("icons/archive-restore.svg")),
+                                                        .child(icon(
+                                                            "icons/archive-restore.svg",
+                                                            cx,
+                                                        )),
                                                 )
                                         }),
                                 )
                             },
                         )
-                        .child(div().h(px(1.)).mx_1().my_1().bg(rgb(theme::BORDER_VARIANT)))
+                        .child(
+                            div()
+                                .h(px(1.))
+                                .mx_1()
+                                .my_1()
+                                .bg(cx.theme().colors().border_variant),
+                        )
                         .child(
                             div()
                                 .id("add-repository")
@@ -718,17 +852,12 @@ impl Sidebar {
                                 .tab_stop(true)
                                 .role(Role::Button)
                                 .aria_label("Add repository")
-                                .flex()
-                                .h(px(32.))
-                                .items_center()
+                                .list_row(32.)
                                 .gap_2()
-                                .px_2()
-                                .rounded_sm()
-                                .text_sm()
                                 .cursor_pointer()
-                                .hover(|item| item.bg(rgb(theme::ELEMENT_HOVER)))
+                                .hover(|item| item.bg(cx.theme().colors().element_hover))
                                 .on_mouse_up(MouseButton::Left, cx.listener(Self::add_repository))
-                                .child(icon("icons/plus.svg"))
+                                .child(icon("icons/plus.svg", cx))
                                 .child(if self.is_adding_repository {
                                     "Adding repository…"
                                 } else {
@@ -763,15 +892,10 @@ impl Sidebar {
                 div()
                     .id(("repository", repository_id.as_i64() as u64))
                     .group("repository-row")
-                    .flex()
-                    .h(px(32.))
-                    .items_center()
+                    .list_row(32.)
                     .justify_between()
-                    .px_2()
-                    .rounded_sm()
-                    .text_sm()
                     .cursor_pointer()
-                    .hover(|row| row.bg(rgb(theme::ELEMENT_HOVER)))
+                    .hover(|row| row.bg(cx.theme().colors().element_hover))
                     .on_mouse_up(
                         MouseButton::Left,
                         cx.listener(move |this, _, _, cx| {
@@ -786,11 +910,14 @@ impl Sidebar {
                             .flex()
                             .items_center()
                             .gap_2()
-                            .child(icon(if is_expanded {
-                                "icons/folder-open.svg"
-                            } else {
-                                "icons/folder.svg"
-                            }))
+                            .child(icon(
+                                if is_expanded {
+                                    "icons/folder-open.svg"
+                                } else {
+                                    "icons/folder.svg"
+                                },
+                                cx,
+                            ))
                             .child(entry.repository.name.clone()),
                     )
                     .child(
@@ -803,7 +930,7 @@ impl Sidebar {
                             .rounded_sm()
                             .invisible()
                             .group_hover("repository-row", |button| button.visible())
-                            .hover(|button| button.bg(rgb(theme::ELEMENT_ACTIVE)))
+                            .hover(|button| button.bg(cx.theme().colors().element_active))
                             .on_mouse_up(
                                 MouseButton::Left,
                                 cx.listener(move |_, _, _, cx| {
@@ -814,7 +941,7 @@ impl Sidebar {
                                     });
                                 }),
                             )
-                            .child(icon("icons/plus.svg")),
+                            .child(icon("icons/plus.svg", cx)),
                     ),
             )
             .when(is_expanded, |repository| {
@@ -832,13 +959,17 @@ impl Sidebar {
                                     .pl(px(24.))
                                     .pr_2()
                                     .text_sm()
-                                    .text_color(rgb(theme::TEXT_PLACEHOLDER))
+                                    .text_color(cx.theme().colors().text_placeholder)
                                     .child("No branches yet"),
                             )
                         })
                         .children(active_branches.into_iter().map(|branch| {
                             let branch_id = branch.id;
                             let is_active = self.active_branch_id == Some(branch_id);
+                            let stat = self
+                                .live_diffs
+                                .get(&repository_id)
+                                .and_then(|live_diff| live_diff.read(cx).stat(branch_id));
                             let dragged = DraggedSidebarBranch {
                                 id: branch_id,
                                 repository_id,
@@ -847,17 +978,12 @@ impl Sidebar {
                             div()
                                 .id(("branch", branch.id.as_i64() as u64))
                                 .group("branch-row")
-                                .flex()
-                                .h(px(28.))
-                                .items_center()
+                                .list_row(28.)
                                 .justify_between()
-                                .px_2()
-                                .rounded_sm()
-                                .text_sm()
                                 .cursor_pointer()
-                                .when(is_active, |row| row.bg(rgb(theme::ELEMENT_ACTIVE)))
+                                .when(is_active, |row| row.bg(cx.theme().colors().element_active))
                                 .when(!is_active, |row| {
-                                    row.hover(|row| row.bg(rgb(theme::ELEMENT_HOVER)))
+                                    row.hover(|row| row.bg(cx.theme().colors().element_hover))
                                 })
                                 .on_mouse_up(
                                     MouseButton::Left,
@@ -867,9 +993,10 @@ impl Sidebar {
                                     }),
                                 )
                                 .on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
-                                .drag_over::<DraggedSidebarBranch>(move |row, dragged, _, _| {
+                                .drag_over::<DraggedSidebarBranch>(move |row, dragged, _, cx| {
                                     if dragged.repository_id == repository_id {
-                                        row.border_b_2().border_color(rgb(theme::ACCENT))
+                                        row.border_b_2()
+                                            .border_color(cx.theme().colors().text_accent)
                                     } else {
                                         row
                                     }
@@ -895,31 +1022,118 @@ impl Sidebar {
                                                 .flex_none()
                                                 .text_right()
                                                 .text_xs()
-                                                .text_color(rgb(theme::TEXT_PLACEHOLDER))
+                                                .text_color(cx.theme().colors().text_placeholder)
                                                 .child(format!("#{}", branch.number)),
                                         )
-                                        .child(branch.name.clone()),
+                                        .child(div().truncate().child(branch.name.clone())),
                                 )
                                 .child(
                                     div()
-                                        .id(("archive-branch", branch.id.as_i64() as u64))
+                                        .relative()
                                         .flex()
-                                        .size(px(22.))
+                                        .w(px(48.))
                                         .flex_none()
                                         .items_center()
-                                        .justify_center()
-                                        .rounded_sm()
-                                        .invisible()
-                                        .group_hover("branch-row", |button| button.visible())
-                                        .hover(|button| button.bg(rgb(theme::ELEMENT_ACTIVE)))
-                                        .on_mouse_up(
-                                            MouseButton::Left,
-                                            cx.listener(move |this, _, window, cx| {
-                                                cx.stop_propagation();
-                                                this.archive_branch(branch_id, window, cx);
-                                            }),
-                                        )
-                                        .child(icon("icons/archive.svg")),
+                                        .justify_end()
+                                        .when_some(stat, |container, stat| {
+                                            container.child(
+                                                div()
+                                                    .flex()
+                                                    .gap_1()
+                                                    .text_xs()
+                                                    .group_hover("branch-row", |counts| {
+                                                        counts.invisible()
+                                                    })
+                                                    .child(
+                                                        div()
+                                                            .text_color(
+                                                                cx.theme()
+                                                                    .colors()
+                                                                    .version_control_added,
+                                                            )
+                                                            .child(format!("+{}", stat.added)),
+                                                    )
+                                                    .child(
+                                                        div()
+                                                            .text_color(
+                                                                cx.theme()
+                                                                    .colors()
+                                                                    .version_control_deleted,
+                                                            )
+                                                            .child(format!("-{}", stat.deleted)),
+                                                    ),
+                                            )
+                                        })
+                                        .child(
+                                            div()
+                                                .absolute()
+                                                .right_0()
+                                                .flex()
+                                                .invisible()
+                                                .group_hover("branch-row", |actions| {
+                                                    actions.visible()
+                                                })
+                                                .child(
+                                                    div()
+                                                        .id((
+                                                            "archive-branch",
+                                                            branch.id.as_i64() as u64,
+                                                        ))
+                                                        .flex()
+                                                        .size(px(22.))
+                                                        .items_center()
+                                                        .justify_center()
+                                                        .rounded_sm()
+                                                        .hover(|button| {
+                                                            button.bg(cx
+                                                                .theme()
+                                                                .colors()
+                                                                .element_active)
+                                                        })
+                                                        .on_mouse_up(
+                                                            MouseButton::Left,
+                                                            cx.listener(
+                                                                move |this, _, window, cx| {
+                                                                    cx.stop_propagation();
+                                                                    this.archive_branch(
+                                                                        branch_id, window, cx,
+                                                                    );
+                                                                },
+                                                            ),
+                                                        )
+                                                        .child(icon("icons/archive.svg", cx)),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .id((
+                                                            "delete-branch",
+                                                            branch.id.as_i64() as u64,
+                                                        ))
+                                                        .flex()
+                                                        .size(px(22.))
+                                                        .items_center()
+                                                        .justify_center()
+                                                        .rounded_sm()
+                                                        .hover(|button| {
+                                                            button.bg(cx
+                                                                .theme()
+                                                                .colors()
+                                                                .element_active)
+                                                        })
+                                                        .on_mouse_up(
+                                                            MouseButton::Left,
+                                                            cx.listener(
+                                                                move |this, _, window, cx| {
+                                                                    cx.stop_propagation();
+                                                                    this.delete_branch(
+                                                                        branch_id, window, cx,
+                                                                    );
+                                                                },
+                                                            ),
+                                                        )
+                                                        .child(icon("icons/trash-2.svg", cx)),
+                                                ),
+                                        ),
                                 )
                         })),
                 )
@@ -935,10 +1149,10 @@ impl gpui::Render for Sidebar {
             .flex_col()
             .w(px(240.))
             .h_full()
-            .bg(rgb(theme::SURFACE))
+            .bg(cx.theme().colors().surface_background)
             .border_r_1()
-            .border_color(rgb(theme::BORDER_VARIANT))
-            .text_color(rgb(theme::TEXT))
+            .border_color(cx.theme().colors().border_variant)
+            .text_color(cx.theme().colors().text)
             .text_sm()
             .child(
                 div().p_2().child(
@@ -957,10 +1171,10 @@ impl gpui::Render for Sidebar {
                         .rounded_sm()
                         .cursor_pointer()
                         .when(self.menu_open, |header| {
-                            header.bg(rgb(theme::ELEMENT_ACTIVE))
+                            header.bg(cx.theme().colors().element_active)
                         })
                         .when(!self.menu_open, |header| {
-                            header.hover(|header| header.bg(rgb(theme::ELEMENT_HOVER)))
+                            header.hover(|header| header.bg(cx.theme().colors().element_hover))
                         })
                         .on_mouse_up(MouseButton::Left, cx.listener(Self::toggle_menu))
                         .child(
@@ -975,12 +1189,12 @@ impl gpui::Render for Sidebar {
                                         .items_center()
                                         .justify_center()
                                         .rounded_sm()
-                                        .bg(rgb(theme::ELEMENT))
-                                        .child(icon("icons/laptop.svg")),
+                                        .bg(cx.theme().colors().element_background)
+                                        .child(icon("icons/laptop.svg", cx)),
                                 )
-                                .child(self.workspace.name.clone()),
+                                .child(format!("{}'s workspace", self.workspace.name)),
                         )
-                        .child(icon("icons/chevrons-up-down.svg"))
+                        .child(icon("icons/chevrons-up-down.svg", cx))
                         .when(self.menu_open, |header| {
                             header.child(self.render_workspace_menu(cx))
                         }),
@@ -993,9 +1207,9 @@ impl gpui::Render for Sidebar {
                         .mt_2()
                         .p_2()
                         .rounded_sm()
-                        .bg(rgb(theme::ELEMENT))
+                        .bg(cx.theme().colors().element_background)
                         .text_xs()
-                        .text_color(rgb(theme::ERROR))
+                        .text_color(cx.theme().status().error)
                         .child(error),
                 )
             })
@@ -1006,6 +1220,9 @@ impl gpui::Render for Sidebar {
                     .flex_1()
                     .flex_col()
                     .overflow_y_scroll()
+                    .track_scroll(&self.repository_list_scroll)
+                    .on_drag_move::<DraggedRepository>(cx.listener(Self::scroll_toward_drag))
+                    .on_drag_move::<DraggedSidebarBranch>(cx.listener(Self::scroll_toward_drag))
                     .p_2()
                     .gap_1()
                     .child(
@@ -1015,7 +1232,7 @@ impl gpui::Render for Sidebar {
                             .items_center()
                             .px_2()
                             .text_sm()
-                            .text_color(rgb(theme::TEXT_MUTED))
+                            .text_color(cx.theme().colors().text_muted)
                             .child("Projects"),
                     )
                     .children(
@@ -1029,36 +1246,28 @@ impl gpui::Render for Sidebar {
 }
 
 impl gpui::Render for DraggedRepository {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        drag_preview(self.name.clone())
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        drag_preview(self.name.clone(), cx)
     }
 }
 
 impl gpui::Render for DraggedSidebarBranch {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        drag_preview(self.label.clone())
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        drag_preview(self.label.clone(), cx)
     }
 }
 
-fn drag_preview(label: String) -> gpui::Div {
+fn drag_preview(label: String, cx: &App) -> gpui::Div {
     div()
         .flex()
         .h(px(32.))
         .min_w(px(160.))
         .items_center()
         .px_2()
-        .bg(rgb(theme::ELEVATED_SURFACE))
+        .bg(cx.theme().colors().elevated_surface_background)
         .border_1()
-        .border_color(rgb(theme::BORDER))
+        .border_color(cx.theme().colors().border)
         .shadow_md()
-        .text_color(rgb(theme::TEXT))
+        .text_color(cx.theme().colors().text)
         .child(label)
-}
-
-fn move_item<T>(items: &mut Vec<T>, source_index: usize, target_index: usize) {
-    if source_index == target_index || source_index >= items.len() || target_index >= items.len() {
-        return;
-    }
-    let item = items.remove(source_index);
-    items.insert(target_index, item);
 }

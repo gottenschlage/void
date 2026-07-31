@@ -8,22 +8,23 @@ use gpui::{
     WindowControlArea, WindowOptions, actions, deferred, div, point, prelude::*, px, rgb, size,
 };
 use gpui_platform::application;
+use ui::{
+    Backspace, Copy, Cut, Delete, Left, Paste, Right, SelectAll, SelectLeft, SelectRight,
+    TextInput, icon_sized,
+};
 use void_terminal::{BranchTerminalPanel, TerminalSettings};
-use workspace::{Branch, BranchId, VoidPaths, Workspace, WorkspaceDb};
+use workspace::{Branch, BranchId, RepositoryId, VoidPaths, Workspace, WorkspaceDb};
 
 use crate::{
     assets::Assets,
+    branch_context_header::{BranchContextHeader, RepositoryLiveDiff},
     branch_dialog::{BranchDialog, BranchDialogEvent, CancelBranch, ConfirmBranch},
     branch_header::{BranchClosed, BranchHeader, BranchSelected, HEADER_HEIGHT},
-    icons::icon_sized,
     sidebar::{AddBranchRequested, BranchArchived, Sidebar, SidebarRepository},
-    text_input::{
-        Backspace, Copy, Cut, Delete, Left, Paste, Right, SelectAll, SelectLeft, SelectRight,
-        TextInput,
-    },
     theme,
     updater::Updater,
 };
+use ::theme::ActiveTheme as _;
 
 const INITIAL_WINDOW_WIDTH: f32 = 1_300.0;
 const INITIAL_WINDOW_HEIGHT: f32 = 850.0;
@@ -89,6 +90,7 @@ pub(crate) fn run() {
     application().with_assets(Assets).run(move |cx: &mut App| {
         settings::init(cx);
         ::theme::init(::theme::LoadThemes::JustBase, cx);
+        theme::init(cx);
         void_terminal::init(cx);
         cx.bind_keys([
             KeyBinding::new("backspace", Backspace, Some("TextInput")),
@@ -185,6 +187,8 @@ struct VoidRoot {
     branch_header_subscription: Option<Subscription>,
     branch_close_subscription: Option<Subscription>,
     branches: HashMap<BranchId, Branch>,
+    repository_live_diffs: HashMap<RepositoryId, Entity<RepositoryLiveDiff>>,
+    branch_context_headers: HashMap<BranchId, Entity<BranchContextHeader>>,
     branch_panels: HashMap<BranchId, Entity<BranchTerminalPanel>>,
     active_branch_id: Option<BranchId>,
     name_input: Entity<TextInput>,
@@ -222,6 +226,8 @@ impl VoidRoot {
             branch_header_subscription: None,
             branch_close_subscription: None,
             branches,
+            repository_live_diffs: HashMap::new(),
+            branch_context_headers: HashMap::new(),
             branch_panels: HashMap::new(),
             active_branch_id: None,
             name_input,
@@ -236,6 +242,9 @@ impl VoidRoot {
         };
         if let Some(sidebar) = sidebar {
             this.attach_sidebar(sidebar, window, cx);
+        }
+        for branch in this.branches.values().cloned().collect::<Vec<_>>() {
+            this.register_branch_diff(&branch, cx);
         }
         if let Some(branch_header) = branch_header {
             this.attach_branch_header(branch_header, window, cx);
@@ -322,7 +331,7 @@ impl VoidRoot {
             .flex()
             .h(px(HEADER_HEIGHT))
             .flex_none()
-            .bg(rgb(theme::SURFACE))
+            .bg(cx.theme().colors().surface_background)
             .on_mouse_down(MouseButton::Left, cx.listener(Self::titlebar_mouse_down))
             .on_mouse_up(
                 MouseButton::Left,
@@ -346,7 +355,7 @@ impl VoidRoot {
                     .overflow_hidden()
                     .border_b_1()
                     .border_r_1()
-                    .border_color(rgb(theme::BORDER_VARIANT))
+                    .border_color(cx.theme().colors().border_variant)
                     .child(
                         div()
                             .id("toggle-sidebar")
@@ -366,7 +375,7 @@ impl VoidRoot {
                             .when(has_sidebar, |button| {
                                 button
                                     .cursor_pointer()
-                                    .hover(|button| button.bg(rgb(theme::ELEMENT_HOVER)))
+                                    .hover(|button| button.bg(cx.theme().colors().element_hover))
                                     .on_mouse_down(
                                         MouseButton::Left,
                                         cx.listener(Self::stop_titlebar_drag),
@@ -377,7 +386,11 @@ impl VoidRoot {
                                     )
                             })
                             .when(!has_sidebar, |button| button.opacity(0.35))
-                            .child(icon_sized("icons/panel-left.svg", 16., theme::TEXT_MUTED)),
+                            .child(icon_sized(
+                                "icons/panel-left.svg",
+                                16.,
+                                cx.theme().colors().text_muted,
+                            )),
                     )
                     .with_animation(
                         ("sidebar-titlebar-width", generation),
@@ -396,7 +409,7 @@ impl VoidRoot {
                         .flex_1()
                         .h_full()
                         .border_b_1()
-                        .border_color(rgb(theme::BORDER_VARIANT)),
+                        .border_color(cx.theme().colors().border_variant),
                 )
             })
     }
@@ -428,6 +441,8 @@ impl VoidRoot {
                 if this.active_branch_id == Some(event.branch_id) {
                     this.active_branch_id = None;
                 }
+                this.release_branch_context(event.branch_id);
+                this.unregister_branch_diff(event.branch_id, cx);
                 this.branches.remove(&event.branch_id);
                 this.branch_panels.remove(&event.branch_id);
                 if let Some(branch_header) = this.branch_header.as_ref() {
@@ -466,6 +481,7 @@ impl VoidRoot {
                         }
                     }
                 }
+                this.release_branch_context(event.branch_id);
                 this.branch_panels.remove(&event.branch_id);
                 if let Some(branch_id) = this.active_branch_id
                     && let Some(panel) = this.branch_panels.get(&branch_id)
@@ -487,8 +503,14 @@ impl VoidRoot {
             sidebar.update(cx, |sidebar, cx| sidebar.select_branch(branch_id, cx));
         }
         if let Some(branch_header) = self.branch_header.as_ref() {
-            branch_header.update(cx, |header, cx| header.open(branch, cx));
+            branch_header.update(cx, |header, cx| header.open(branch.clone(), cx));
         }
+        let live_diff = self.register_branch_diff(&branch, cx);
+        self.branch_context_headers
+            .entry(branch_id)
+            .or_insert_with(|| {
+                cx.new(|cx| BranchContextHeader::new(branch.clone(), live_diff, cx))
+            });
         let panel = self.branch_panels.entry(branch_id).or_insert_with(|| {
             cx.new(|_| {
                 BranchTerminalPanel::new(
@@ -499,6 +521,49 @@ impl VoidRoot {
         });
         panel.update(cx, |panel, cx| panel.activate(window, cx));
         cx.notify();
+    }
+
+    fn release_branch_context(&mut self, branch_id: BranchId) {
+        self.branch_context_headers.remove(&branch_id);
+    }
+
+    fn register_branch_diff(
+        &mut self,
+        branch: &Branch,
+        cx: &mut Context<Self>,
+    ) -> Entity<RepositoryLiveDiff> {
+        let live_diff = self
+            .repository_live_diffs
+            .entry(branch.repository_id)
+            .or_insert_with(|| cx.new(|_| RepositoryLiveDiff::new()))
+            .clone();
+        live_diff.update(cx, |live_diff, cx| live_diff.register(branch, cx));
+        if let Some(sidebar) = self.sidebar.as_ref() {
+            sidebar.update(cx, |sidebar, cx| {
+                sidebar.observe_live_diff(branch.repository_id, live_diff.clone(), cx);
+            });
+        }
+        live_diff
+    }
+
+    fn unregister_branch_diff(&mut self, branch_id: BranchId, cx: &mut Context<Self>) {
+        let Some(repository_id) = self
+            .branches
+            .get(&branch_id)
+            .map(|branch| branch.repository_id)
+        else {
+            return;
+        };
+        let Some(live_diff) = self.repository_live_diffs.get(&repository_id).cloned() else {
+            return;
+        };
+        live_diff.update(cx, |live_diff, cx| live_diff.unregister(branch_id, cx));
+        if live_diff.read(cx).is_empty() {
+            self.repository_live_diffs.remove(&repository_id);
+            if let Some(sidebar) = self.sidebar.as_ref() {
+                sidebar.update(cx, |sidebar, _| sidebar.forget_live_diff(repository_id));
+            }
+        }
     }
 
     fn open_branch_dialog(
@@ -604,9 +669,9 @@ impl VoidRoot {
             .gap_4()
             .p_6()
             .rounded_lg()
-            .bg(rgb(theme::ELEVATED_SURFACE))
+            .bg(cx.theme().colors().elevated_surface_background)
             .border_1()
-            .border_color(rgb(theme::BORDER))
+            .border_color(cx.theme().colors().border)
             .shadow_lg()
             .child(
                 div()
@@ -617,13 +682,18 @@ impl VoidRoot {
                     .child(
                         div()
                             .text_sm()
-                            .text_color(rgb(theme::TEXT_MUTED))
+                            .text_color(cx.theme().colors().text_muted)
                             .child("Name the workspace you will use in Void."),
                     ),
             )
             .child(self.name_input.clone())
             .when_some(self.error.clone(), |view, error| {
-                view.child(div().text_xs().text_color(rgb(theme::ERROR)).child(error))
+                view.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().status().error)
+                        .child(error),
+                )
             })
             .child(
                 div()
@@ -637,9 +707,9 @@ impl VoidRoot {
                     .items_center()
                     .justify_center()
                     .rounded_sm()
-                    .bg(rgb(theme::ACCENT))
+                    .bg(cx.theme().colors().text_accent)
                     .text_sm()
-                    .text_color(rgb(theme::EDITOR_BACKGROUND))
+                    .text_color(cx.theme().colors().editor_background)
                     .when(!self.is_creating, |button| {
                         button
                             .cursor_pointer()
@@ -660,6 +730,9 @@ impl Render for VoidRoot {
         let active_panel = self
             .active_branch_id
             .and_then(|branch_id| self.branch_panels.get(&branch_id).cloned());
+        let active_context_header = self
+            .active_branch_id
+            .and_then(|branch_id| self.branch_context_headers.get(&branch_id).cloned());
         let sidebar_open = self.sidebar_open;
         let generation = self.sidebar_animation_generation;
         let sidebar_end_width = if sidebar_open { SIDEBAR_WIDTH } else { 0.0 };
@@ -674,8 +747,8 @@ impl Render for VoidRoot {
             .flex()
             .flex_col()
             .size_full()
-            .bg(rgb(theme::EDITOR_BACKGROUND))
-            .text_color(rgb(theme::TEXT))
+            .bg(cx.theme().colors().editor_background)
+            .text_color(cx.theme().colors().text)
             .font_family(theme::UI_FONT)
             .text_size(px(theme::UI_FONT_SIZE))
             .child(self.render_titlebar(cx))
@@ -708,17 +781,28 @@ impl Render for VoidRoot {
                         .child(
                             div()
                                 .flex()
+                                .flex_col()
                                 .flex_1()
                                 .min_w_0()
-                                .items_center()
-                                .justify_center()
-                                .text_color(rgb(theme::TEXT_MUTED))
-                                .when_some(active_panel, |content, panel| {
-                                    content.items_stretch().justify_start().child(panel)
+                                .min_h_0()
+                                .when_some(active_context_header, |content, header| {
+                                    content.child(header)
                                 })
-                                .when(self.active_branch_id.is_none(), |content| {
-                                    content.child("Select a branch")
-                                }),
+                                .child(
+                                    div()
+                                        .flex()
+                                        .flex_1()
+                                        .min_h_0()
+                                        .items_center()
+                                        .justify_center()
+                                        .text_color(cx.theme().colors().text_muted)
+                                        .when_some(active_panel, |content, panel| {
+                                            content.items_stretch().justify_start().child(panel)
+                                        })
+                                        .when(self.active_branch_id.is_none(), |content| {
+                                            content.child("Select a branch")
+                                        }),
+                                ),
                         )
                     })
                     .when(self.workspace.is_none(), |body| {

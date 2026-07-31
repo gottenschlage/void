@@ -9,7 +9,8 @@ Void has a GPUI application shell, workspace onboarding, a repository sidebar, a
 Void follows Zed's Cargo-workspace organization without pre-creating speculative crates:
 
 - The root `Cargo.toml` owns workspace membership, dependency revisions, package defaults, and shared lints.
-- `crates/void` is the native binary and current composition root.
+- `crates/void` is the native binary and current composition root. Screen-level components (`sidebar.rs`, `branch_header.rs`, `branch_dialog.rs`) stay here, since each depends on `workspace`'s domain types (`Branch`, `Repository`).
+- `crates/ui` holds reusable, domain-agnostic UI primitives — building blocks that render with only `gpui` and `theme`, with no knowledge of Void's product types. See [ADR 0006](decisions/0006-extract-a-reusable-ui-crate.md).
 - `crates/workspace` owns application-data paths and SQLite persistence for workspaces, repositories, and Void-managed branches/worktrees.
 - Future domain or UI crates should be introduced only when a requested feature has a clear responsibility and a corresponding Zed architecture to reference.
 
@@ -32,11 +33,19 @@ The current native startup flow is:
 
 No process ownership, terminals, or agents exist yet.
 
+## Theming
+
+`::theme::init` (the pinned GPUI revision's `theme` crate) runs first and installs Zed's bundled "One Dark" theme as the active `theme::GlobalTheme`. `crate::theme::init` (`crates/void/src/theme.rs`) then replaces it with Void's palette: it fetches that same bundled theme from `theme::ThemeRegistry` and calls `ThemeColors::refined` with a `ThemeColorsRefinement` that overrides only the surface, border, element, and text tokens Void's UI renders, leaving syntax/status/vim/diff/terminal-ANSI colors as Zed's verified defaults.
+
+Render code reads colors through `theme::ActiveTheme` (`cx.theme().colors().<field>`, `cx.theme().status().<field>`), never through hardcoded constants. `UI_FONT` and `UI_FONT_SIZE` remain plain constants in `crate::theme`, since fonts are not part of `theme::Theme` in the pinned revision — Zed itself sources fonts from the separate `theme_settings` crate, which Void does not depend on (see [ADR 0005](decisions/0005-adopt-zeds-theme-token-system.md) for why). Buffer/terminal font sizing is still owned independently by `void_terminal::TerminalSettings`.
+
+`text_accent` (`rgb(0x3794ff)`) is the one shared accent color for both primary-button backgrounds and drag-and-drop indicators; scrollable containers that accept a drag (`sidebar.rs`'s repository list, `branch_header.rs`'s and `void_terminal`'s tab bars) also auto-scroll toward the cursor's edge mid-drag via `ui::auto_scroll_toward_edge`, so a drop target scrolled out of view can still be reached. See [ADR 0007](decisions/0007-drag-and-drop-accent-color-and-auto-scroll.md).
+
 ## First-launch UI
 
 The absence of a workspace record is the onboarding state; no separate preference or completion flag exists. The first screen asks only for a non-empty workspace name. Submission is available from Enter and the create button, and the database write runs outside rendering. Once the write completes, the same root entity transitions to the main-screen placeholder and displays the persisted name.
 
-The small single-line input in `crates/void/src/text_input.rs` follows GPUI's official input example and implements `EntityInputHandler`, UTF-8/UTF-16 conversion, selection, clipboard actions, platform composition, focus, and accessibility semantics. It is local to the binary until repeated form needs justify a shared UI component.
+The small single-line input in `crates/ui/src/text_input.rs` follows GPUI's official input example and implements `EntityInputHandler`, UTF-8/UTF-16 conversion, selection, clipboard actions, platform composition, focus, and accessibility semantics.
 
 ## Native window shell
 
@@ -112,6 +121,29 @@ pending output before painting, and sends grid-size changes through
 `Terminal::set_size`. Releasing the session releases the terminal entity, so
 Zed's terminal teardown owns graceful process-tree termination and escalation.
 No detached subprocess wrapper exists alongside that lifecycle.
+
+The application root owns one live-diff entity for each repository with an
+active branch and one lightweight header entity for each open branch. The header
+displays `#<number> <base-ref>/<branch-name>` above the terminal tabs. Its count
+deliberately follows Zed's Git-panel meaning:
+`git diff --numstat --no-renames HEAD --`, so it covers staged and unstaged
+tracked changes but excludes committed changes, untracked files, and binary
+line totals. Clean counts and errors before the first successful refresh remain
+hidden. Each sidebar branch row displays the same count by default and replaces
+it with the archive and delete actions while hovered.
+
+Each repository live-diff entity owns one `notify` watcher covering the shared
+Git directory and every registered managed worktree. Worktree and linked-index
+events refresh only their branch; shared-ref events refresh all registered
+branches. Events are coalesced, and each branch permits one asynchronous,
+cancellable Git command plus one pending follow-up. Initial refresh does not
+depend on watcher setup. Watch failures are logged and retried with bounded
+backoff, while the last successful count remains available. Closing a terminal
+tab keeps its worktree registered. Archiving or deleting a branch unregisters
+it; removing the repository's final active branch drops the entity, watcher,
+retries, and Git tasks together. Git state stays in the application/workspace
+boundary rather than entering `void_terminal`.
+See [`decisions/0008-live-head-to-worktree-diff.md`](decisions/0008-live-head-to-worktree-diff.md).
 
 Branch selection is handled by window-aware GPUI subscriptions. Selection
 creates the branch panel and its first session before notifying the UI, then
@@ -270,3 +302,10 @@ Verified against local Zed commit `5e549b871fb87d1038d9b1b242bf7d4d4e3b4d8f`:
 - `crates/workspace/src/persistence.rs::WorkspaceDb` — domain migrations and typed persistence.
 - `crates/git/src/repository.rs::{Branch, Worktree, CreateWorktreeTarget}` — Git branch/worktree semantics.
 - `crates/project/src/git_store.rs` — repository identity and linked-worktree state.
+- `crates/git/src/repository.rs::GitRepository::diff_stat`,
+  `crates/git/src/status.rs::{DiffStat, parse_numstat}`, and
+  `crates/project/src/git_store.rs::{Repository::paths_changed, compute_snapshot}` —
+  live `HEAD`-to-worktree diff-stat semantics, background refresh, and change
+  notification.
+- `crates/ui/src/components/diff_stat.rs::DiffStat` — compact addition and
+  deletion count presentation.

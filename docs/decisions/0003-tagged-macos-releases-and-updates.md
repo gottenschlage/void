@@ -56,6 +56,16 @@ before packaging. `script/bundle-mac` builds the Apple-silicon app with
 DMG, and emits a checksum. The workflow publishes those artifacts only after
 all prior steps succeed.
 
+The application icon follows Zed's static macOS bundle pattern. A prepared
+512×512 PNG and its 1024×1024 `@2x` counterpart live under
+`crates/void/resources/` and are declared in Cargo's bundle metadata.
+`cargo-bundle` combines them into `Void.icns`, copies it into the application
+resources, and writes `CFBundleIconFile` into `Info.plist`. The source mark is
+solid black; the prepared PNGs place it within a centered 824×824 rounded
+rectangle with a 100 px transparent inset and a 185 px corner radius on the
+1024 px canvas. Keeping this geometry explicit makes future icon exports
+reproducible without adding a runtime or build-time image dependency.
+
 Release builds poll
 `https://github.com/usamaasfar/void/releases/latest/download/update.json`.
 The manifest contains only a stable version, an exact GitHub release-asset URL,
@@ -99,7 +109,9 @@ surface requires a separate product decision and platform-specific validation.
 ## References
 
 - Local Zed commit `5e549b871fb87d1038d9b1b242bf7d4d4e3b4d8f`:
-  - `crates/zed/Cargo.toml` bundle identifiers
+  - `crates/zed/Cargo.toml` bundle identifiers and channel-specific icon lists
+  - `crates/zed/resources/app-icon.png`
+  - `crates/zed/resources/app-icon@2x.png`
   - `crates/auto_update/src/auto_update.rs::AutoUpdater`
   - `crates/auto_update/src/auto_update.rs::install_release_macos`
   - `script/bundle-mac`
@@ -111,6 +123,8 @@ surface requires a separate product decision and platform-specific validation.
 - Apple Developer documentation:
   - <https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution>
   - <https://developer.apple.com/documentation/xcode/creating-distribution-signed-code-for-the-mac>
+  - <https://developer.apple.com/design/human-interface-guidelines/app-icons>
+  - <https://developer.apple.com/documentation/bundleresources/information-property-list/cfbundleiconfile>
 - `cargo-bundle` 0.11 metadata documentation:
   - <https://docs.rs/crate/cargo-bundle/0.11.0/source/Readme.md>
 - GitHub Actions and Releases documentation:

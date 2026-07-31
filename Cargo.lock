@@ -7417,6 +7417,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ui"
+version = "0.1.0"
+dependencies = [
+ "gpui",
+ "theme",
+]
+
+[[package]]
 name = "unarray"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7700,11 +7708,14 @@ name = "void"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-channel 2.5.0",
  "gpui",
  "gpui_platform",
+ "notify",
  "objc2-app-kit 0.3.2",
  "petname",
  "raw-window-handle",
+ "refineable",
  "rust-embed",
  "semver",
  "serde",
@@ -7714,6 +7725,7 @@ dependencies = [
  "smol",
  "tempfile",
  "theme",
+ "ui",
  "util",
  "void_terminal",
  "workspace",
@@ -7726,6 +7738,7 @@ dependencies = [
  "gpui",
  "task",
  "terminal",
+ "ui",
  "util",
 ]
 
@@ -9030,6 +9043,7 @@ dependencies = [
  "dirs",
  "gpui",
  "pollster 0.4.0",
+ "smol",
  "sqlez",
  "sqlez_macros",
 ]

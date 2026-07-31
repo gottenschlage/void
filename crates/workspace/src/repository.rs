@@ -4,11 +4,83 @@ use std::{
 };
 
 use anyhow::{Context as _, Result, bail};
+use smol::process::Command as AsyncCommand;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GitRepositoryLocation {
     pub name: String,
     pub path: PathBuf,
+}
+
+/// Added and deleted lines in a Git diff.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct DiffStat {
+    pub added: u32,
+    pub deleted: u32,
+}
+
+/// Git directories whose changes can affect a managed worktree's diff.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GitWatchPaths {
+    pub git_dir: PathBuf,
+    pub common_dir: PathBuf,
+}
+
+/// Counts tracked staged and unstaged changes between `HEAD` and a worktree.
+///
+/// Binary and untracked files do not contribute line counts, matching
+/// `git diff --numstat` and Zed's Git-panel diff statistic.
+pub async fn head_to_worktree_diff_stat(worktree_path: &Path) -> Result<DiffStat> {
+    let mut command = AsyncCommand::new("git");
+    command
+        .arg("-C")
+        .arg(worktree_path)
+        .args(["diff", "--numstat", "--no-renames", "HEAD", "--"])
+        .kill_on_drop(true);
+    let output = command
+        .output()
+        .await
+        .context("could not run Git; make sure git is installed")?;
+    let output = ensure_git_success(output, "could not calculate worktree diff")?;
+    let stdout =
+        String::from_utf8(output.stdout).context("Git returned diff output that is not UTF-8")?;
+    Ok(parse_numstat(&stdout))
+}
+
+/// Resolves the worktree-specific and shared Git directories for file watching.
+pub fn git_watch_paths(worktree_path: &Path) -> Result<GitWatchPaths> {
+    Ok(GitWatchPaths {
+        git_dir: git_path(worktree_path, "--absolute-git-dir")?,
+        common_dir: git_path(worktree_path, "--git-common-dir")?,
+    })
+}
+
+fn git_path(worktree_path: &Path, argument: &str) -> Result<PathBuf> {
+    let output = git(
+        worktree_path,
+        ["rev-parse", "--path-format=absolute", argument],
+    )?;
+    let output = ensure_git_success(output, "could not resolve Git metadata")?;
+    let path =
+        String::from_utf8(output.stdout).context("Git returned a path that is not valid UTF-8")?;
+    Ok(PathBuf::from(path.trim()))
+}
+
+fn parse_numstat(output: &str) -> DiffStat {
+    output.lines().fold(DiffStat::default(), |mut total, line| {
+        let mut fields = line.splitn(3, '\t');
+        let (Some(added), Some(deleted), Some(_path)) =
+            (fields.next(), fields.next(), fields.next())
+        else {
+            return total;
+        };
+        let (Ok(added), Ok(deleted)) = (added.parse::<u32>(), deleted.parse::<u32>()) else {
+            return total;
+        };
+        total.added = total.added.saturating_add(added);
+        total.deleted = total.deleted.saturating_add(deleted);
+        total
+    })
 }
 
 /// Resolves a selected directory to a canonical Git worktree root.
@@ -146,6 +218,29 @@ pub fn create_git_worktree(
     Ok(())
 }
 
+/// Removes a branch's worktree and deletes the local Git branch.
+///
+/// The worktree is removed first: Git refuses to delete a branch that is
+/// still checked out in a worktree.
+pub fn delete_git_worktree(
+    repository_path: &Path,
+    worktree_path: &Path,
+    branch_name: &str,
+) -> Result<()> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repository_path)
+        .args(["worktree", "remove", "--force"])
+        .arg(worktree_path)
+        .output()
+        .context("could not run Git; make sure git is installed")?;
+    ensure_git_success(output, "could not remove the Git worktree")?;
+
+    let output = git(repository_path, ["branch", "-D", branch_name])?;
+    ensure_git_success(output, "could not delete the Git branch")?;
+    Ok(())
+}
+
 fn git<const N: usize>(repository_path: &Path, args: [&str; N]) -> Result<Output> {
     Command::new("git")
         .arg("-C")
@@ -244,6 +339,117 @@ mod tests {
     }
 
     #[test]
+    fn parses_text_numstat_and_ignores_binary_entries() {
+        assert_eq!(
+            parse_numstat("12\t3\tsrc/main.rs\n-\t-\timage.png\n4\t9\tREADME.md\n"),
+            DiffStat {
+                added: 16,
+                deleted: 12,
+            }
+        );
+    }
+
+    #[test]
+    fn counts_staged_and_unstaged_changes_from_head() {
+        let repository = TestRepository::new();
+        repository.create_initial_commit();
+
+        fs::write(repository.0.join("README.md"), "changed\nsecond line\n").unwrap();
+        assert!(
+            Command::new("git")
+                .arg("-C")
+                .arg(&repository.0)
+                .args(["add", "README.md"])
+                .status()
+                .unwrap()
+                .success()
+        );
+        fs::write(
+            repository.0.join("README.md"),
+            "changed again\nsecond line\nthird line\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            pollster::block_on(head_to_worktree_diff_stat(&repository.0)).unwrap(),
+            DiffStat {
+                added: 3,
+                deleted: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn excludes_untracked_files() {
+        let repository = TestRepository::new();
+        repository.create_initial_commit();
+        fs::write(repository.0.join("untracked.txt"), "not counted\n").unwrap();
+
+        assert_eq!(
+            pollster::block_on(head_to_worktree_diff_stat(&repository.0)).unwrap(),
+            DiffStat::default()
+        );
+    }
+
+    #[test]
+    fn counts_staged_new_files_and_resets_after_commit() {
+        let repository = TestRepository::new();
+        repository.create_initial_commit();
+        fs::write(repository.0.join("new.txt"), "one\ntwo\n").unwrap();
+        assert!(
+            Command::new("git")
+                .arg("-C")
+                .arg(&repository.0)
+                .args(["add", "new.txt"])
+                .status()
+                .unwrap()
+                .success()
+        );
+
+        assert_eq!(
+            pollster::block_on(head_to_worktree_diff_stat(&repository.0)).unwrap(),
+            DiffStat {
+                added: 2,
+                deleted: 0,
+            }
+        );
+        assert!(
+            Command::new("git")
+                .arg("-C")
+                .arg(&repository.0)
+                .args(["commit", "--quiet", "-m", "Add new file"])
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert_eq!(
+            pollster::block_on(head_to_worktree_diff_stat(&repository.0)).unwrap(),
+            DiffStat::default()
+        );
+    }
+
+    #[test]
+    fn excludes_binary_line_counts() {
+        let repository = TestRepository::new();
+        repository.create_initial_commit();
+        fs::write(repository.0.join("binary.dat"), b"before\0after").unwrap();
+        assert!(
+            Command::new("git")
+                .arg("-C")
+                .arg(&repository.0)
+                .args(["add", "binary.dat"])
+                .status()
+                .unwrap()
+                .success()
+        );
+
+        assert_eq!(
+            pollster::block_on(head_to_worktree_diff_stat(&repository.0)).unwrap(),
+            DiffStat::default()
+        );
+    }
+
+    #[test]
     fn rejects_a_directory_without_git_metadata() {
         let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
         let path = std::env::temp_dir().join(format!(
@@ -273,11 +479,40 @@ mod tests {
         .unwrap();
 
         assert!(worktree_path.join(".git").is_file());
+        let watch_paths = git_watch_paths(&worktree_path).unwrap();
+        assert!(watch_paths.git_dir.is_dir());
+        assert!(watch_paths.common_dir.is_dir());
+        assert_ne!(watch_paths.git_dir, watch_paths.common_dir);
         assert!(
             local_git_branches(&repository.0)
                 .unwrap()
                 .contains(&"feature/test-worktree".to_owned())
         );
         fs::remove_dir_all(worktree_path).ok();
+    }
+
+    #[test]
+    fn deletes_a_worktree_and_its_branch() {
+        let repository = TestRepository::new();
+        repository.create_initial_commit();
+        let base_branch = local_git_branches(&repository.0).unwrap().remove(0);
+        let worktree_path = repository.0.with_extension("deletable-worktree");
+
+        create_git_worktree(
+            &repository.0,
+            "feature/deletable",
+            &worktree_path,
+            &base_branch,
+        )
+        .unwrap();
+
+        delete_git_worktree(&repository.0, &worktree_path, "feature/deletable").unwrap();
+
+        assert!(!worktree_path.exists());
+        assert!(
+            !local_git_branches(&repository.0)
+                .unwrap()
+                .contains(&"feature/deletable".to_owned())
+        );
     }
 }

@@ -1,13 +1,14 @@
 use gpui::{
     Anchor, Context, EventEmitter, Focusable, MouseButton, MouseDownEvent, MouseUpEvent, Role,
-    Window, actions, anchored, deferred, div, prelude::*, px, rgb,
+    Window, actions, anchored, deferred, div, prelude::*, px,
 };
+use theme::ActiveTheme;
 use workspace::{
     Branch, NewBranch, Repository, VoidPaths, WorkspaceDb, create_git_worktree, local_git_branches,
     validate_git_branch_request,
 };
 
-use crate::{icons::icon, text_input::TextInput, theme};
+use ui::{ListRow, TextInput, dialog, icon, popover};
 
 actions!(branch_dialog, [ConfirmBranch, CancelBranch]);
 
@@ -217,31 +218,21 @@ impl BranchDialog {
     fn render_base_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
         deferred(
             anchored().anchor(Anchor::BottomLeft).child(
-                div()
+                popover(cx)
                     .id("base-branches")
                     .w_full()
                     .max_h(px(220.))
                     .overflow_y_scroll()
                     .p_1()
-                    .rounded_md()
-                    .bg(rgb(theme::ELEVATED_SURFACE))
-                    .border_1()
-                    .border_color(rgb(theme::BORDER))
-                    .shadow_md()
                     .on_mouse_down_out(cx.listener(Self::dismiss_base_menu))
                     .children(self.base_branches.iter().cloned().enumerate().map(
                         |(index, branch)| {
                             let selected_branch = branch.clone();
                             div()
                                 .id(("base-branch", index))
-                                .h(px(28.))
-                                .flex()
-                                .items_center()
-                                .px_2()
-                                .rounded_sm()
-                                .text_sm()
+                                .list_row(28.)
                                 .cursor_pointer()
-                                .hover(|row| row.bg(rgb(theme::ELEMENT_HOVER)))
+                                .hover(|row| row.bg(cx.theme().colors().element_hover))
                                 .on_mouse_up(
                                     MouseButton::Left,
                                     cx.listener(move |this, _, _, cx| {
@@ -268,7 +259,7 @@ impl gpui::Render for BranchDialog {
             window.defer(cx, move |window, cx| window.focus(&focus_handle, cx));
         }
 
-        div()
+        dialog(cx)
             .key_context("BranchDialog")
             .on_action(cx.listener(Self::confirm))
             .on_action(cx.listener(Self::cancel))
@@ -277,13 +268,8 @@ impl gpui::Render for BranchDialog {
             .w(px(480.))
             .gap_5()
             .p_5()
-            .rounded_lg()
-            .bg(rgb(theme::ELEVATED_SURFACE))
-            .border_1()
-            .border_color(rgb(theme::BORDER))
-            .text_color(rgb(theme::TEXT))
+            .text_color(cx.theme().colors().text)
             .text_sm()
-            .shadow_lg()
             .child(
                 div()
                     .flex()
@@ -299,9 +285,9 @@ impl gpui::Render for BranchDialog {
                             .justify_center()
                             .rounded_sm()
                             .cursor_pointer()
-                            .hover(|button| button.bg(rgb(theme::ELEMENT_HOVER)))
+                            .hover(|button| button.bg(cx.theme().colors().element_hover))
                             .on_mouse_up(MouseButton::Left, cx.listener(Self::click_dismiss))
-                            .child(icon("icons/x.svg")),
+                            .child(icon("icons/x.svg", cx)),
                     ),
             )
             .child(
@@ -312,7 +298,7 @@ impl gpui::Render for BranchDialog {
                     .child(
                         div()
                             .text_sm()
-                            .text_color(rgb(theme::TEXT_MUTED))
+                            .text_color(cx.theme().colors().text_muted)
                             .child("Base branch"),
                     )
                     .child(
@@ -325,9 +311,9 @@ impl gpui::Render for BranchDialog {
                             .justify_between()
                             .px_2()
                             .rounded_sm()
-                            .bg(rgb(theme::ELEMENT))
+                            .bg(cx.theme().colors().element_background)
                             .border_1()
-                            .border_color(rgb(theme::BORDER))
+                            .border_color(cx.theme().colors().border)
                             .when(
                                 !self.is_loading_branches && !self.base_branches.is_empty(),
                                 |menu| {
@@ -342,7 +328,7 @@ impl gpui::Render for BranchDialog {
                                     .flex()
                                     .items_center()
                                     .gap_2()
-                                    .child(icon("icons/git-branch.svg"))
+                                    .child(icon("icons/git-branch.svg", cx))
                                     .child(if self.is_loading_branches {
                                         "Loading branches…".to_owned()
                                     } else {
@@ -351,7 +337,7 @@ impl gpui::Render for BranchDialog {
                                             .unwrap_or_else(|| "No local branches".into())
                                     }),
                             )
-                            .child(icon("icons/chevrons-up-down.svg"))
+                            .child(icon("icons/chevrons-up-down.svg", cx))
                             .when(self.base_menu_open, |menu| {
                                 menu.child(self.render_base_menu(cx))
                             }),
@@ -365,7 +351,7 @@ impl gpui::Render for BranchDialog {
                     .child(
                         div()
                             .text_sm()
-                            .text_color(rgb(theme::TEXT_MUTED))
+                            .text_color(cx.theme().colors().text_muted)
                             .child("Branch name"),
                     )
                     .child(
@@ -381,14 +367,19 @@ impl gpui::Render for BranchDialog {
                                 .justify_center()
                                 .rounded_sm()
                                 .cursor_pointer()
-                                .hover(|button| button.bg(rgb(theme::ELEMENT_HOVER)))
+                                .hover(|button| button.bg(cx.theme().colors().element_hover))
                                 .on_mouse_up(MouseButton::Left, cx.listener(Self::regenerate_name))
-                                .child(icon("icons/dices.svg")),
+                                .child(icon("icons/dices.svg", cx)),
                         ),
                     ),
             )
             .when_some(self.error.clone(), |dialog, error| {
-                dialog.child(div().text_xs().text_color(rgb(theme::ERROR)).child(error))
+                dialog.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().status().error)
+                        .child(error),
+                )
             })
             .child(
                 div()
@@ -408,12 +399,12 @@ impl gpui::Render for BranchDialog {
                             .px_3()
                             .rounded_sm()
                             .border_1()
-                            .border_color(rgb(theme::BORDER))
+                            .border_color(cx.theme().colors().border)
                             .text_sm()
                             .when(!self.is_creating, |button| {
                                 button
                                     .cursor_pointer()
-                                    .hover(|button| button.bg(rgb(theme::ELEMENT_HOVER)))
+                                    .hover(|button| button.bg(cx.theme().colors().element_hover))
                                     .on_mouse_up(
                                         MouseButton::Left,
                                         cx.listener(Self::click_dismiss),
@@ -433,9 +424,9 @@ impl gpui::Render for BranchDialog {
                             .items_center()
                             .px_3()
                             .rounded_sm()
-                            .bg(rgb(theme::ACCENT))
+                            .bg(cx.theme().colors().text_accent)
                             .text_sm()
-                            .text_color(rgb(theme::EDITOR_BACKGROUND))
+                            .text_color(cx.theme().colors().editor_background)
                             .when(!self.is_creating, |button| {
                                 button
                                     .cursor_pointer()

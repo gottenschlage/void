@@ -1,12 +1,13 @@
 //! Selectable, closable, draggable tabs for open Void branches.
 
 use gpui::{
-    Context, EventEmitter, MouseButton, MouseDownEvent, MouseUpEvent, Render, Window, div,
-    prelude::*, px, rgb,
+    Context, DragMoveEvent, EventEmitter, MouseButton, MouseDownEvent, MouseUpEvent, Render,
+    ScrollHandle, Window, div, prelude::*, px,
 };
+use theme::ActiveTheme;
 use workspace::{Branch, BranchId};
 
-use crate::{icons::icon_sized, theme};
+use ui::{auto_scroll_toward_edge, icon_sized, move_item};
 
 pub(crate) const HEADER_HEIGHT: f32 = 37.5;
 const TAB_WIDTH: f32 = 165.0;
@@ -31,6 +32,7 @@ struct DraggedBranch {
 pub(crate) struct BranchHeader {
     branches: Vec<Branch>,
     active_branch_id: Option<BranchId>,
+    tabs_scroll: ScrollHandle,
 }
 
 impl EventEmitter<BranchSelected> for BranchHeader {}
@@ -41,7 +43,20 @@ impl BranchHeader {
         Self {
             active_branch_id: branches.first().map(|branch| branch.id),
             branches,
+            tabs_scroll: ScrollHandle::new(),
         }
+    }
+
+    /// Scrolls the tab bar toward the cursor's edge while a tab is being
+    /// dragged, so a target scrolled out of view can still be reached.
+    fn scroll_toward_drag(
+        &mut self,
+        event: &DragMoveEvent<DraggedBranch>,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        auto_scroll_toward_edge(&self.tabs_scroll, event.event.position, event.bounds);
+        cx.notify();
     }
 
     pub(crate) fn add_branch(&mut self, branch: Branch, cx: &mut Context<Self>) {
@@ -146,7 +161,7 @@ impl BranchHeader {
             return;
         };
 
-        move_branch(&mut self.branches, source_index, target_index);
+        move_item(&mut self.branches, source_index, target_index);
         cx.notify();
     }
 }
@@ -159,6 +174,8 @@ impl Render for BranchHeader {
             .h(px(HEADER_HEIGHT))
             .flex_none()
             .overflow_x_scroll()
+            .track_scroll(&self.tabs_scroll)
+            .on_drag_move::<DraggedBranch>(cx.listener(Self::scroll_toward_drag))
             .children(self.branches.iter().enumerate().map(|(index, branch)| {
                 let branch_id = branch.id;
                 let is_active = self.active_branch_id == Some(branch_id);
@@ -180,17 +197,19 @@ impl Render for BranchHeader {
                     .items_center()
                     .px_3()
                     .border_r_1()
-                    .border_color(rgb(theme::BORDER_VARIANT))
-                    .text_color(rgb(if is_active {
-                        theme::TEXT
+                    .border_color(cx.theme().colors().border_variant)
+                    .text_color(if is_active {
+                        cx.theme().colors().text
                     } else {
-                        theme::TEXT_MUTED
-                    }))
+                        cx.theme().colors().text_muted
+                    })
                     .cursor_pointer()
                     .on_mouse_down(MouseButton::Left, cx.listener(Self::stop_titlebar_drag))
-                    .when(is_active, |tab| tab.bg(rgb(theme::SURFACE)))
+                    .when(is_active, |tab| {
+                        tab.bg(cx.theme().colors().surface_background)
+                    })
                     .when(!is_active, |tab| {
-                        tab.hover(|tab| tab.bg(rgb(theme::ELEMENT_HOVER)))
+                        tab.hover(|tab| tab.bg(cx.theme().colors().element_hover))
                     })
                     .when(!is_active, |tab| {
                         tab.child(
@@ -200,7 +219,7 @@ impl Render for BranchHeader {
                                 .right_0()
                                 .bottom_0()
                                 .h(px(1.))
-                                .bg(rgb(theme::BORDER_VARIANT)),
+                                .bg(cx.theme().colors().border_variant),
                         )
                     })
                     .on_mouse_up(
@@ -210,8 +229,8 @@ impl Render for BranchHeader {
                         }),
                     )
                     .on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
-                    .drag_over::<DraggedBranch>(move |tab, dragged, _, _| {
-                        let tab = tab.border_color(rgb(theme::ACCENT));
+                    .drag_over::<DraggedBranch>(move |tab, dragged, _, cx| {
+                        let tab = tab.border_color(cx.theme().colors().text_accent);
                         if index < dragged.index {
                             tab.border_r_2()
                         } else if index > dragged.index {
@@ -236,7 +255,7 @@ impl Render for BranchHeader {
                             .rounded_sm()
                             .opacity(0.)
                             .group_hover("branch-tab", |button| button.opacity(1.))
-                            .hover(|button| button.bg(rgb(theme::ELEMENT_HOVER)))
+                            .hover(|button| button.bg(cx.theme().colors().element_hover))
                             .on_mouse_down(MouseButton::Left, cx.listener(Self::stop_titlebar_drag))
                             .on_mouse_up(
                                 MouseButton::Left,
@@ -244,7 +263,11 @@ impl Render for BranchHeader {
                                     this.close_branch(branch_id, event, window, cx);
                                 }),
                             )
-                            .child(icon_sized("icons/x.svg", 12., theme::TEXT_MUTED)),
+                            .child(icon_sized(
+                                "icons/x.svg",
+                                12.,
+                                cx.theme().colors().text_muted,
+                            )),
                     )
             }))
             .child(
@@ -253,38 +276,26 @@ impl Render for BranchHeader {
                     .min_w(px(1.))
                     .flex_1()
                     .border_b_1()
-                    .border_color(rgb(theme::BORDER_VARIANT)),
+                    .border_color(cx.theme().colors().border_variant),
             )
     }
 }
 
 impl Render for DraggedBranch {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .flex()
             .w(px(TAB_WIDTH))
             .h(px(HEADER_HEIGHT))
             .items_center()
             .px_3()
-            .bg(rgb(theme::SURFACE))
+            .bg(cx.theme().colors().surface_background)
             .border_1()
-            .border_color(rgb(theme::BORDER))
+            .border_color(cx.theme().colors().border)
             .shadow_md()
-            .text_color(rgb(theme::TEXT))
+            .text_color(cx.theme().colors().text)
             .child(self.label.clone())
     }
-}
-
-fn move_branch<T>(branches: &mut Vec<T>, source_index: usize, target_index: usize) {
-    if source_index == target_index
-        || source_index >= branches.len()
-        || target_index >= branches.len()
-    {
-        return;
-    }
-
-    let branch = branches.remove(source_index);
-    branches.insert(target_index, branch);
 }
 
 fn fallback_index_after_close(closed_index: usize, remaining_len: usize) -> Option<usize> {
@@ -293,18 +304,7 @@ fn fallback_index_after_close(closed_index: usize, remaining_len: usize) -> Opti
 
 #[cfg(test)]
 mod tests {
-    use super::{fallback_index_after_close, move_branch};
-
-    #[test]
-    fn moves_branches_in_both_directions() {
-        let mut branches = vec![1, 2, 3];
-
-        move_branch(&mut branches, 0, 2);
-        assert_eq!(branches, [2, 3, 1]);
-
-        move_branch(&mut branches, 2, 0);
-        assert_eq!(branches, [1, 2, 3]);
-    }
+    use super::fallback_index_after_close;
 
     #[test]
     fn closing_uses_the_right_neighbor_then_the_left() {

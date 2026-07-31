@@ -17,7 +17,7 @@ use gpui::{
     Context, IntoElement, MouseButton, MouseUpEvent, Render, Task, Window, div,
     http_client::{AsyncBody, HttpClient, HttpRequestExt, RedirectPolicy, Request},
     prelude::*,
-    px, rgb,
+    px,
 };
 use semver::Version;
 use serde::Deserialize;
@@ -26,9 +26,8 @@ use smol::{
     fs::File,
     io::{AsyncReadExt, AsyncWriteExt},
 };
+use theme::ActiveTheme;
 use util::command::new_command;
-
-use crate::theme;
 
 const UPDATE_FEED_URL: &str =
     "https://github.com/usamaasfar/void/releases/latest/download/update.json";
@@ -261,22 +260,22 @@ impl Render for Updater {
             .bottom(px(12.))
             .max_w(px(520.))
             .rounded_sm()
-            .bg(rgb(theme::SURFACE))
+            .bg(cx.theme().colors().surface_background)
             .border_1()
-            .border_color(rgb(theme::BORDER))
+            .border_color(cx.theme().colors().border)
             .px_3()
             .py_2()
             .text_xs()
             .when(action == Some(true), |button| {
                 button
                     .cursor_pointer()
-                    .hover(|button| button.bg(rgb(theme::ELEMENT_HOVER)))
+                    .hover(|button| button.bg(cx.theme().colors().element_hover))
                     .on_mouse_up(MouseButton::Left, cx.listener(Self::restart))
             })
             .when(action == Some(false), |button| {
                 button
                     .cursor_pointer()
-                    .hover(|button| button.bg(rgb(theme::ELEMENT_HOVER)))
+                    .hover(|button| button.bg(cx.theme().colors().element_hover))
                     .on_mouse_up(MouseButton::Left, cx.listener(Self::retry))
             })
             .child(label)

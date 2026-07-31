@@ -39,6 +39,11 @@ All entries below use the Zed revision recorded above.
   lifecycle implementations under `crates/void` adapt the Zed and GPUI
   sources identified in `docs/architecture.md` and the decision records under
   `docs/decisions`.
+- Live diff parsing, refresh ownership, and counter presentation in
+  `crates/workspace/src/repository.rs` and
+  `crates/void/src/branch_context_header.rs` adapt the corresponding patterns
+  from Zed's `git`, `project`, and `ui` crates. Void uses the same `notify`
+  release as this Zed revision for the narrower managed-worktree watcher.
 - The integrated title-bar movement and input-ownership pattern in
   `crates/void/src/application.rs` adapts Zed's `platform_title_bar` behavior.
   The target-only `raw-window-handle` and `objc2-app-kit` crates are used by

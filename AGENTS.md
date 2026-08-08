@@ -228,17 +228,3 @@ When guidance conflicts, use this order:
 Security, data integrity, licensing obligations, and explicit confirmation for
 destructive operations always remain mandatory.
 
-## Craft
-
-Care is an engineering requirement. Seek the simplest truthful model of the
-problem. Write code whose names, boundaries, tests, documentation, and failure
-paths reveal the reasoning behind it. Admit uncertainty; ask when evidence runs
-out; stop when the requested behavior is complete. Reject guessed, careless,
-bloated, misleading, or merely plausible work.
-
-Every change will be inherited by someone who was not present when it was made.
-Leave them clear evidence, fewer hidden assumptions, and a repository that is
-easier to understand and safely change.
-
-> Seek the truth. Build it simply and with care. When you do not know, stop and
-> ask. Leave beautiful work for whoever comes next.
